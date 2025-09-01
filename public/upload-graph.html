@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Gráficas del Historial</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="LCT_SF.png">
+  <link rel="stylesheet" href="style.css">
+
+  <!-- Firebase config si lo usas en otras partes -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="firebase-config.js"></script>
+
+  <!-- Plotly.js en lugar de Chart.js -->
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+  <nav>
+    <a href="index.html">Inicio</a> |
+    <a href="grafpart.html">Gráficas Partículas</a> |
+    <a href="grafvocnox.html">Gráficas VOC & NOx</a> |
+    <a href="grafamb.html">Gráficas CO2, Temperatura & Humedad</a> |
+    <a href="upload-graph.html">Gráficas del Historial</a>
+  </nav>
+  <hr>
+  <h1>LCT Didacticos</h1><img src="LCT_SF.png" width="90">
+  <h2>Gráficas del Historial</h2>
+  <div class="upload-section">
+    <label for="csvFileInput" class="unified-button">Cargar CSV y Graficar</label>
+    <input type="file" id="csvFileInput" accept=".csv" style="display: none;">
+    <p id="statusMessage"></p>
+  </div>
+  <hr>
+  <h2>Gráfica de Datos Historico</h2>
+  <div class="chart-controls">
+    <label for="dataSelector">Seleccionar Dato a Graficar:</label>
+    <select id="dataSelector">
+      <option value="pm1.0">PM1.0</option>
+      <option value="pm2.5">PM2.5</option>
+      <option value="pm4.0">PM4.0</option>
+      <option value="pm10.0">PM10.0</option>
+      <option value="voc">VOC</option>
+      <option value="nox">NOx</option>
+      <option value="co2">CO2</option>
+      <option value="Temperatura">Temperatura</option>
+      <option value="HumedadRelativa">Humedad</option>
+    </select>
+  </div>
+  <div class="double_range_slider_box">
+  <div class="double_range_slider">
+    <span class="range_track" id="range_track"></span>
+
+    <!-- MAX primero (capa más baja), luego MIN (para que quede encima) -->
+    <input type="range" class="max" min="0" max="100" value="100" step="1" />
+    <input type="range" class="min" min="0" max="100" value="0" step="1" />
+
+    <div class="minvalue">0</div>
+    <div class="maxvalue">100</div>
+  </div>
+</div>
+  <div class="chart-container">
+    <!-- Usamos un div en lugar de canvas para Plotly -->
+    <div id="myChart" class="chart-container1" style="width:100%;height:100%;"></div> 
+  </div>
+  <!-- Tabla dinámica de datos graficados -->
+  <div id="dataTable" class="data-table-container"></div>
+  <script src="upload-graph.js"></script>
+</body>
+</html>

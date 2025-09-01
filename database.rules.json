@@ -1,0 +1,12 @@
+{
+  "rules": {
+    "ultima_medicion": {
+      ".read": "true",
+      ".write": "auth.token.email == 'ingenieria@lctdidacticos.com'"
+    },
+    "historial_mediciones": {
+      ".read": "true",
+      ".write": "auth.token.email == 'ingenieria@lctdidacticos.com'"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Gráficas VOC & NOx</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="LCT_SF.png">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+  <script src="firebase-config.js"></script>
+</head>
+<body>
+  <nav>
+    <a href="index.html">Inicio</a> |
+    <a href="grafpart.html">Gráficas Partículas</a> |
+    <a href="grafvocnox.html">Gráficas VOC & NOx</a> |
+    <a href="grafamb.html">Gráficas CO2, Temperatura & Humedad</a> |
+    <a href="upload-graph.html">Graficas del Historial</a>
+  </nav>
+  <hr>
+  <h1>LCT Didacticos</h1><img src="LCT_SF.png" width="90"></h1>
+  <h2>Gráficas Tiempo Real - VOC & NOx</h2>
+
+    <div id="VOC" class="chart-container1"></div>
+    <div id="NOx" class="chart-container1"></div>
+
+  <script src="grafvocnox.js"></script>
+</body>
+</html>
