@@ -36,6 +36,7 @@ sensorDataRef.on('value', (snapshot) => {
   const data = snapshot.val();
   const dataTable = document.getElementById("data-table");
   const timeInfo = document.getElementById("time-info");
+  const IDBCursor = document.getElementById("ID");
 
   if (data) {
     let tableHTML = `
@@ -60,7 +61,7 @@ sensorDataRef.on('value', (snapshot) => {
     `;
 
     IDBCursor.innerHTML= `
-    <h2>ID:</h2> ${ESPIDGlobal ?? '---'} 
+    <strong>ID:</strong> ${ESPIDGlobal ?? '---'}  <br>
     `;
   }
 });
