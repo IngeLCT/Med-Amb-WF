@@ -34,9 +34,7 @@ csvFileInput.addEventListener('change', () => {
                 return parts[0] * 3600 + parts[1] * 60 + (parts[2] || 0);
             };
 
-            currentLoadedData = parsedData.sort((a, b) => {
-                return parseTimeToSeconds(a.tiempo) - parseTimeToSeconds(b.tiempo);
-            });
+            currentLoadedData = parsedData; // Respeta el orden original del CSV
 
             if (currentLoadedData.length === 0) {
                 statusMessage.textContent = 'El archivo CSV está vacío o no contiene datos válidos.';
@@ -81,15 +79,45 @@ function parseCsv(csvString) {
     return data;
 }
 
+function getBarColor(dataLabel) {
+    // Asignar color según el tipo de medición, igual que en las gráficas individuales
+    const label = dataLabel.toLowerCase();
+    // PM10.0 debe ir antes que PM1.0 para evitar coincidencias
+    if (label.includes('pm10')) return '#bf00ff'; // PM10.0
+    if (label.includes('pm1.0') || label.includes('pm1p0')) return 'red'; // PM1.0
+    if (label.includes('pm2.5') || label.includes('pm2_5')) return '#bfa600'; // PM2.5 amarillo oscuro
+    if (label.includes('pm4.0') || label.includes('pm4_0')) return '#00bfbf'; // PM4.0 turquesa
+    if (label.includes('co2')) return '#990000'; // CO2
+    if (label.includes('temperatura') || label.includes('temp') || label.includes('cte')) return '#006600'; // Temperatura
+    if (label.includes('humedad') || label.includes('hum') || label.includes('chu')) return '#0000cc'; // Humedad
+    if (label.includes('voc')) return '#ff8000'; // VOC
+    if (label.includes('nox')) return '#ff0040'; // NOx
+    // Puedes agregar más reglas aquí si tienes más mediciones
+    return '#000066'; // color por defecto
+}
+
 function createOrUpdatePlotly(dataToChart, dataLabel, timeLabels) {
     chartContainer.innerHTML = '';
 
+    // Etiquetas X: formato ISO para time series
+    const start = parseInt(rangeInputs[0].value);
+    const end = parseInt(rangeInputs[1].value);
+    const customLabels = currentLoadedData.slice(start, end + 1).map(row => {
+        // Convertir fechaDeMedicion de DD-MM-YY a YYYY-MM-DD
+    let fecha = row.fechaDeMedicion || '';
+    let hora = row.HoraMedicion || '';
+    let partes = fecha.split('-');
+    // Ahora el año ya viene completo (YYYY)
+    let yyyy = partes[2];
+    let isoDate = `${yyyy}-${partes[1]?.padStart(2, '0') || ''}-${partes[0]?.padStart(2, '0') || ''}`;
+    return `${isoDate} ${hora}`;
+    });
     const trace = {
-        x: timeLabels,
+        x: customLabels,
         y: dataToChart,
-        mode: 'lines',
+        type: 'bar',
         name: dataLabel,
-        line: { color: '#000066' }
+        marker: { color: getBarColor(dataLabel) }
     };
 
     const layout = {
@@ -99,14 +127,17 @@ function createOrUpdatePlotly(dataToChart, dataLabel, timeLabels) {
         },
         xaxis: {
             title: {
-                text: 'Tiempo Transcurrido',
+                text: 'Fecha y Hora de Medición',
                 font: { size: 16, color: 'black', family: 'Arial', weight: 'bold' },
                 standoff: 20
             },
+            type: 'date',
             tickfont: { color: 'black', size: 14, family: 'Arial', weight: 'bold' },
             gridcolor: 'black',
             linecolor: 'black',
-            tickangle: -45
+            autorange: true,
+            tickangle: -45,
+            nticks: 30,
         },
         yaxis: {
             title: {
@@ -115,11 +146,13 @@ function createOrUpdatePlotly(dataToChart, dataLabel, timeLabels) {
             },
             tickfont: { color: 'black', size: 14, family: 'Arial', weight: 'bold' },
             gridcolor: 'black',
-            linecolor: 'black'
+            linecolor: 'black',
+            autorange: true,
+            fixedrange: false
         },
         plot_bgcolor: "#cce5dc",
         paper_bgcolor: "#cce5dc",
-        margin: { t: 50, l: 60, r: 40, b: 80 }
+        margin: { t: 50, l: 60, r: 40, b: 90 }
     };
 
     Plotly.newPlot(chartContainer, [trace], layout, {
@@ -148,7 +181,7 @@ function updateChartInRange() {
 
     const slice = currentLoadedData.slice(start, end + 1);
     const values = slice.map(row => parseFloat(row[key])).filter(v => !isNaN(v));
-    const labels = slice.map(row => row.TiempoTranscurrido);
+    const labels = slice.map(row => row.HoraMedicion);
 
     createOrUpdatePlotly(values, label, labels);
 }
@@ -193,12 +226,14 @@ const MaxVlaueBubbleStyle = () => {
   maxBubble.style.left = `${percent}%`;
 };
 const setMinValueOutput = () => {
-  minRange = parseInt(rangeInputs[0].value);
-  minBubble.innerHTML = currentLoadedData[minRange]?.TiempoTranscurrido || '';
+    minRange = parseInt(rangeInputs[0].value);
+    const row = currentLoadedData[minRange];
+    minBubble.innerHTML = row ? `${row.fechaDeMedicion || ''} ${row.HoraMedicion || ''}` : '';
 };
 const setMaxValueOutput = () => {
-  maxRange = parseInt(rangeInputs[1].value);
-  maxBubble.innerHTML = currentLoadedData[maxRange]?.TiempoTranscurrido || '';
+    maxRange = parseInt(rangeInputs[1].value);
+    const row = currentLoadedData[maxRange];
+    maxBubble.innerHTML = row ? `${row.fechaDeMedicion || ''} ${row.HoraMedicion || ''}` : '';
 };
 
 rangeInputs.forEach((input) => {
@@ -234,9 +269,10 @@ rangeInputs.forEach((input) => {
 
 const dataTableContainer = document.createElement('div');
 dataTableContainer.id = 'dataTable';
-dataTableContainer.style.margin = '20px auto';
+dataTableContainer.style.margin = '40px auto 20px auto'; // margen superior aumentado para separar de la gráfica
 dataTableContainer.style.maxWidth = '1200px';
 dataTableContainer.style.overflowX = 'auto';
+dataTableContainer.style.borderTop = 'none'; // asegurarse que no haya línea negra
 document.body.appendChild(dataTableContainer);
 
 const ROWS_PER_PAGE = 20;
@@ -245,39 +281,43 @@ let currentPage = 1;
 function updateDataTable(dataSlice, key) {
   if (!Array.isArray(dataSlice)) return;
 
-  const table = document.createElement('table');
-  const thead = document.createElement('thead');
-  const headerRow = document.createElement('tr');
-  ['#', 'Tiempo', key.toUpperCase()].forEach(text => {
-    const th = document.createElement('th');
-    th.textContent = text;
-    headerRow.appendChild(th);
-  });
-  thead.appendChild(headerRow);
-  table.appendChild(thead);
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    ['#', 'HoraMedicion', 'FechaMedicion', key.toUpperCase()].forEach(text => {
+        const th = document.createElement('th');
+        th.textContent = text;
+        headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
 
-  const tbody = document.createElement('tbody');
-  dataSlice.forEach((row, i) => {
-    const tr = document.createElement('tr');
+    const tbody = document.createElement('tbody');
+    dataSlice.forEach((row, i) => {
+        const tr = document.createElement('tr');
 
-    const tdIndex = document.createElement('td');
-    tdIndex.textContent = i;
-    tr.appendChild(tdIndex);
+        const tdIndex = document.createElement('td');
+        tdIndex.textContent = i;
+        tr.appendChild(tdIndex);
 
-    const tdTime = document.createElement('td');
-    tdTime.textContent = row.TiempoTranscurrido || '-';
-    tr.appendChild(tdTime);
+        const tdTime = document.createElement('td');
+        tdTime.textContent = row.HoraMedicion || '-';
+        tr.appendChild(tdTime);
 
-    const tdValue = document.createElement('td');
-    tdValue.textContent = row[key] || '-';
-    tr.appendChild(tdValue);
+        const tdFecha = document.createElement('td');
+        tdFecha.textContent = row.fechaDeMedicion || '-';
+        tr.appendChild(tdFecha);
 
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
+        const tdValue = document.createElement('td');
+        tdValue.textContent = row[key] || '-';
+        tr.appendChild(tdValue);
 
-  dataTableContainer.innerHTML = '';
-  dataTableContainer.appendChild(table);
+        tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+
+    dataTableContainer.innerHTML = '';
+    dataTableContainer.appendChild(table);
 }
 
 function updateChartInRange() {
@@ -291,7 +331,7 @@ function updateChartInRange() {
 
   const slice = currentLoadedData.slice(start, end + 1);
   const values = slice.map(row => parseFloat(row[key])).filter(v => !isNaN(v));
-  const labels = slice.map(row => row.TiempoTranscurrido);
+    const labels = slice.map(row => row.HoraMedicion);
 
   createOrUpdatePlotly(values, label, labels);
   currentPage = 1;

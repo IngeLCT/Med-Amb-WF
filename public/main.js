@@ -1,3 +1,5 @@
+
+
 const firebaseConfig = {
   apiKey: "AIzaSyAowEsndAOgwtEIfBABbq_GKNTX3bHh_VM",
   authDomain: "calidadaire-677f9.firebaseapp.com",
