@@ -8,6 +8,7 @@ window.addEventListener("load", () => {
   let firstData = false;
   function removeLoading(){
     if(firstData) return; firstData = true;
+    // Elimina solo los divs de mensaje de carga, nunca la gráfica
     document.querySelectorAll('.loading-msg').forEach(n=>{
       const p=n.parentNode; if(n.parentNode) n.parentNode.removeChild(n); if(p) p.style.paddingTop='';
     });
@@ -24,31 +25,42 @@ window.addEventListener("load", () => {
 
   function initBar(divId, label, color, yMin, yMax) {
     Plotly.newPlot(divId, [{
-      x: [],
-      y: [],
+      x: Array.from({ length: MAX_POINTS }, (_, i) => i),
+      y: new Array(MAX_POINTS).fill(null),
       type: 'bar',
       name: label,
       marker: { color }
     }], {
-      title: { text: label, font: { size: 20, color: 'black', family: 'Arial', weight: 'bold' } },
+      title: {
+        text: label,
+        font: { size: 20, color: 'black', family: 'Arial', weight: 'bold' }
+      },
       xaxis: {
-        title: { text: 'Fecha y Hora de Medición', font: { size: 16, color: 'black', family: 'Arial', weight: 'bold' }, standoff: 20 },
-        type: 'date',
+        title: {
+          text: 'Fecha y Hora de Medición',
+          font: { size: 16, color: 'black', family: 'Arial', weight: 'bold' },
+          standoff: 20
+        },
+        type: 'category',
         tickfont: { color: 'black', size: 14, family: 'Arial', weight: 'bold' },
         gridcolor: 'black',
         linecolor: 'black',
         autorange: true,
         tickangle: -45,
-        nticks: 30
       },
       yaxis: {
-        title: { text: label, font: { size: 16, color: 'black', family: 'Arial', weight: 'bold' } },
+        title: {
+          text: label,
+          font: { size: 16, color: 'black', family: 'Arial', weight: 'bold' }
+        },
         tickfont: { color: 'black', size: 14, family: 'Arial', weight: 'bold' },
         gridcolor: 'black',
         linecolor: 'black',
-        autorange: true,
+        // Forzar control manual del rango del eje Y
+        autorange: false,
         fixedrange: false,
-        range: (yMin !== null && yMax !== null) ? [yMin, yMax] : undefined
+        // Rango inicial por defecto (se actualizará dinámicamente con los datos)
+        range: (yMin !== null && yMax !== null) ? [yMin, yMax] : [0, 10]
       },
       plot_bgcolor: '#cce5dc',
       paper_bgcolor: '#cce5dc',
@@ -90,36 +102,73 @@ window.addEventListener("load", () => {
     return `${isoDate} ${h}`;
   }
 
-  function BarSeries(divId) {
+    function BarSeries(divId) {
     this.divId = divId;
-    this.x = [];
-    this.y = [];
-    this.keys = []; // claves firebase para child_changed
+    this.slotIdx = Array.from({ length: MAX_POINTS }, (_, i) => i);
+    this.lbl = new Array(MAX_POINTS).fill('');
+    this.y = new Array(MAX_POINTS).fill(null);
+    this.keys = new Array(MAX_POINTS).fill(null);
+  }
+  function updateYAxisRange(divId, yValues){
+    // Calcular el máximo dentro de los últimos (hasta) 24 puntos y fijar el eje Y
+    const finite = (yValues||[]).filter(v => Number.isFinite(v) && v >= 0);
+    const maxVal = finite.length ? Math.max(...finite) : 0;
+    // Escala: doble del dato más grande; si no hay datos, usar 1 como mínimo visible
+    const upper = (maxVal > 0) ? (maxVal * 2) : 1;
+    Plotly.relayout(divId, {
+      'yaxis.autorange': false,
+      'yaxis.range': [0, upper]
+    });
+  }
+        function updateXAxisTicks(divId, xVals, labels){
+    const tickvals = Array.isArray(xVals) ? xVals : [];
+    const vals = Array.isArray(labels) ? labels : [];
+    const ticktext = [];
+    let prevDate = null;
+    let seen = false;
+    for(let i=0; i<vals.length; i++){
+      const s = String(vals[i] ?? '');
+      const m = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2}(?::\d{2})?)/);
+      let datePart = '', timePart = '';
+      if(m){ datePart = m[1]; timePart = m[2]; }
+      else { const parts = s.split(/\s+/); datePart = parts[0] || ''; timePart = parts[1] || parts[0] || ''; }
+      const hhmm = (timePart || '').split(':').slice(0,2).join(':') || s;
+      const isFirstNonEmpty = (!seen && !!datePart);
+      const dateChanged = datePart && prevDate && (datePart !== prevDate);
+      const showDate = isFirstNonEmpty || dateChanged;
+      const dispDate = datePart ? datePart.split('-').slice(0,3).reverse().join('-') : '';
+      ticktext.push(showDate && datePart ? `${hhmm}<br>${dispDate}` : hhmm);
+      if(datePart){ if(!seen) seen = true; prevDate = datePart; }
+    }
+    Plotly.relayout(divId, {
+      'xaxis.tickmode': 'array',
+      'xaxis.tickvals': tickvals,
+      'xaxis.ticktext': ticktext
+    });
   }
   BarSeries.prototype.addPoint = function(key, label, value) {
     if (this.keys.includes(key)) return; // ya existe
-    this.keys.push(key);
-    this.x.push(label);
-    this.y.push(value);
-    if (this.x.length > MAX_POINTS) {
-      this.x.shift();
-      this.y.shift();
-      this.keys.shift();
-    }
-    Plotly.update(this.divId, { x: [this.x], y: [this.y] });
+    this.y.shift(); this.y.push(value);
+    this.lbl.shift(); this.lbl.push(label);
+    this.keys.shift(); this.keys.push(key);
+    Plotly.update(this.divId, { x: [this.slotIdx], y: [this.y] });
+    updateXAxisTicks(this.divId, this.slotIdx, this.lbl);
+    updateYAxisRange(this.divId, this.y);
   };
   BarSeries.prototype.updatePoint = function(key, newValue) {
     const idx = this.keys.indexOf(key);
     if (idx === -1) return;
     this.y[idx] = newValue;
     Plotly.restyle(this.divId, { y: [this.y] });
+    updateXAxisTicks(this.divId, this.slotIdx, this.lbl);
+    updateYAxisRange(this.divId, this.y);
   };
 
-  // Inicializar gráficas
-  initBar("chartPM1", "PM1.0 µg/m³", "red", 0, 100);
-  initBar("chartPM2_5", "PM2.5 µg/m³", "#bfa600", 0, 300); // amarillo oscuro
-  initBar("chartPM4_0", "PM4.0 µg/m³", "#00bfbf", 0, 500); // turquesa
-  initBar("chartPM10", "PM10.0 µg/m³", "#bf00ff", 0, 400);
+  // Inicializar gráficas (sin rango fijo; se ajusta dinámicamente)
+  initBar("chartPM1", "PM1.0 µg/m³", "red", null, null);
+  initBar("chartPM2_5", "PM2.5 µg/m³", "#bfa600", null, null); // amarillo oscuro
+  initBar("chartPM4_0", "PM4.0 µg/m³", "#00bfbf", null, null); // turquesa
+  initBar("chartPM10", "PM10.0 µg/m³", "#bf00ff", null, null);
 
   const sPM1 = new BarSeries('chartPM1');
   const sPM25 = new BarSeries('chartPM2_5');
@@ -129,6 +178,7 @@ window.addEventListener("load", () => {
   const db = firebase.database();
   const baseQuery = db.ref('/historial_mediciones').orderByKey().limitToLast(MAX_POINTS);
 
+  // Cargar los últimos 15 existentes
   let lastMarkerDateISO = null;
   baseQuery.once('value', snap => {
     const dataObj = snap.val();
@@ -147,6 +197,7 @@ window.addEventListener("load", () => {
     removeLoading();
   });
 
+  // Escuchar nuevos (después de los ya cargados)
   db.ref('/historial_mediciones').limitToLast(1).on('child_added', snap => {
     const key = snap.key;
     const val = snap.val();
@@ -159,6 +210,7 @@ window.addEventListener("load", () => {
     sPM10.addPoint(key, label, val?.pm10p0 ?? 0);
   });
 
+  // Actualización si se modifica el último nodo
   db.ref('/historial_mediciones').limitToLast(1).on('child_changed', snap => {
     const key = snap.key;
     const val = snap.val();
@@ -166,90 +218,5 @@ window.addEventListener("load", () => {
     sPM25.updatePoint(key, val.pm2p5 ?? 0);
     sPM40.updatePoint(key, val.pm4p0 ?? 0);
     sPM10.updatePoint(key, val.pm10p0 ?? 0);
-  });
-});
-window.addEventListener("load", () => {
-  const MAX_DATA_POINTS = 20;
-
-  function initPlot(divId, label, color, yMin, yMax) {
-    Plotly.newPlot(divId, [{
-      x: [],
-      y: [],
-      mode: 'lines',
-      name: label,
-      line: { color: color }
-    }], {
-      title: {
-        text: label,
-        font: { size: 20, color: 'black', family: 'Arial', weight: 'bold' }
-      },
-      xaxis: {
-        title: {
-          text: 'Tiempo Transcurrido',
-          font: { size: 16, color: 'black', family: 'Arial', weight: 'bold' },
-          standoff: 20  // separa el título de los ticks
-        },
-        tickfont: {
-          color: 'black',
-          size: 14,
-          family: 'Arial',
-          weight: 'bold'
-        },
-        tickangle: -45,  // puedes ajustar a -30 o -60 si prefieres
-        gridcolor: 'black',
-        linecolor: 'black',
-        zeroline: false
-      },
-      yaxis: {
-        title: {
-          text: label,
-          font: { size: 16, color: 'black', family: 'Arial', weight: 'bold' }
-        },
-        tickfont: { color: 'black', size: 14, family: 'Arial', weight: 'bold' },
-        gridcolor: 'black',
-        linecolor: 'black',
-        zeroline: false,
-        range: (yMin !== null && yMax !== null) ? [yMin, yMax] : undefined
-      },
-      plot_bgcolor: "#cce5dc",
-      paper_bgcolor: "#cce5dc",
-      margin: { t: 50, l: 60, r: 40, b: 80 },  // margen inferior aumentado
-    });
-  }
-
-  function updatePlot(divId, timeLabel, value) {
-    Plotly.extendTraces(divId, {
-      x: [[timeLabel]],
-      y: [[value]]
-    }, [0]);
-
-    const graphDiv = document.getElementById(divId);
-    const xLen = graphDiv.data[0].x.length;
-    if (xLen > MAX_DATA_POINTS) {
-      Plotly.relayout(divId, {
-        'xaxis.range': [xLen - MAX_DATA_POINTS, xLen]
-      });
-    }
-  }
-
-  initPlot("chartPM1", "PM1.0 µg/m³", "red", 0, 100);
-  initPlot("chartPM2_5", "PM2.5 µg/m", "blue", 0, 300);
-  initPlot("chartPM4_0", "PM4.0 µg/m³", "green", 0, 500);
-  initPlot("chartPM10", "PM10.0 µg/m³", "#bf00ff", 0, 400);
-
-  const database = firebase.database();
-  const ref = database.ref("/ultima_medicion");
-
-  ref.on("value", (snapshot) => {
-    const data = snapshot.val();
-    if (!data) return;
-
-    const timestamp = data.tiempo ?? new Date().toLocaleTimeString();
-
-    updatePlot("chartPM1", timestamp, data.pm1p0 ?? 0);
-    updatePlot("chartPM2_5", timestamp, data.pm2p5 ?? 0);
-    updatePlot("chartPM4_0", timestamp, data.pm4p0 ?? 0);
-    updatePlot("chartPM10", timestamp, data.pm10p0 ?? 0);
-
   });
 });

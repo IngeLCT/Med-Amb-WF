@@ -1,6 +1,7 @@
 // grafamb.js
 window.addEventListener('load', () => {
   const MAX_POINTS = 24;
+  // Mensaje de carga: arriba, estilo unificado
   const loadingClass = 'loading-msg';
   ['CO2','TEM','HUM'].forEach(id=>{
     const el=document.getElementById(id);
@@ -10,14 +11,15 @@ window.addEventListener('load', () => {
       el.insertAdjacentHTML('afterbegin',
         '<div class="'+loadingClass+'" style="position:absolute;top:4px;left:0;width:100%;text-align:center;font-size:28px;font-weight:bold;color:#000;letter-spacing:.5px;pointer-events:none;">Cargando datos...</div>'
       );
-      el.style.paddingTop = '36px';
+  // reservar espacio para que no se sobreponga con el título de la gráfica
+  el.style.paddingTop = '36px';
     }
   });
 
   function initBar(divId, label, color, yMin, yMax){
     Plotly.newPlot(divId,[{
-      x:[],
-      y:[],
+      x: Array.from({ length: MAX_POINTS }, (_, i) => i),
+      y: new Array(MAX_POINTS).fill(null),
       type:'bar',
       name:label,
       marker:{color}
@@ -26,19 +28,18 @@ window.addEventListener('load', () => {
         text:label,
         font:{size:20,color:'black',family:'Arial',weight:'bold'}
       },
-      xaxis:{
+      xaxis: {
         title:{
           text:'Fecha y Hora de Medición',
           font:{size:16,color:'black',family:'Arial',weight:'bold'},
           standoff:20
         },
-        type:'date',
+        type: 'category',
         tickfont:{color:'black',size:14,family:'Arial',weight:'bold'},
         gridcolor:'black',
         linecolor:'black',
-        autorange:true,
+        autorange: true,
         tickangle:-45,
-        nticks:30
       },
       yaxis:{
         title:{
@@ -48,9 +49,9 @@ window.addEventListener('load', () => {
         tickfont:{color:'black',size:14,family:'Arial',weight:'bold'},
         gridcolor:'black',
         linecolor:'black',
-        autorange:true,
+        autorange: true,
         fixedrange:false,
-        range:(yMin!==null&&yMax!==null)?[yMin,yMax]:undefined
+        range: (yMin!==null&&yMax!==null)?[yMin,yMax]:[0, 10]
       },
       plot_bgcolor:'#cce5dc',
       paper_bgcolor:'#cce5dc',
@@ -74,10 +75,16 @@ window.addEventListener('load', () => {
   }
   function addDays(isoDate, days){ const d=new Date(isoDate+'T00:00:00'); d.setDate(d.getDate()+days); const yyyy=d.getFullYear(); const mm=String(d.getMonth()+1).padStart(2,'0'); const dd=String(d.getDate()).padStart(2,'0'); return `${yyyy}-${mm}-${dd}`; }
   function inferDatesForEntries(entries){
+    // entries: array of [key, val] in chronological order oldest->newest
     const n = entries.length;
     const dates = new Array(n).fill(null);
+    // Find marker indices from newest to oldest
     const markers = [];
     for(let i=n-1;i>=0;i--){ const v=entries[i][1]; if(v && v.fecha){ markers.push(i); } }
+    // Assign segments based on rule:
+    // Newest segment [M0..n-1] -> date(M0)
+    // For j from 0..markers.length-2: (M_{j+1}+1 .. M_j-1] -> date(M_j) - 1
+    // Oldest before last marker [0..M_last-1] -> date(M_last) - 1
     if(markers.length>0){
       const M0 = markers[0];
       const dateM0 = toIsoDate(entries[M0][1].fecha);
@@ -94,6 +101,7 @@ window.addEventListener('load', () => {
       const assignedOld = addDays(toIsoDate(entries[Mlast][1].fecha),-1);
       for(let i=0;i<Mlast;i++){ dates[i]=assignedOld; }
     } else {
+      // No markers: fallback to today's date
       const today = toIsoDate();
       for(let i=0;i<n;i++){ dates[i]=today; }
     }
@@ -101,13 +109,60 @@ window.addEventListener('load', () => {
   }
   function makeTimestampWithDate(isoDate, v){ const h = v.hora || v.tiempo || '00:00:00'; return `${isoDate} ${h}`; }
 
-  function Series(divId){ this.divId=divId; this.x=[]; this.y=[]; this.keys=[]; }
-  Series.prototype.add=function(key,label,val){ if(this.keys.includes(key))return; this.keys.push(key); this.x.push(label); this.y.push(val); if(this.x.length>MAX_POINTS){this.x.shift();this.y.shift();this.keys.shift();} Plotly.update(this.divId,{x:[this.x],y:[this.y]}); };
-  Series.prototype.update=function(key,val){ const i=this.keys.indexOf(key); if(i===-1)return; this.y[i]=val; Plotly.restyle(this.divId,{y:[this.y]}); };
+    function Series(divId){
+    this.divId = divId;
+    this.slotIdx = Array.from({ length: MAX_POINTS }, (_, i) => i);
+    this.lbl = new Array(MAX_POINTS).fill('');
+    this.y = new Array(MAX_POINTS).fill(null);
+    this.keys = new Array(MAX_POINTS).fill(null);
+  }
+    function updateYAxisRange(divId, yValues){
+    const finite = (yValues||[]).filter(v => Number.isFinite(v) && v >= 0);
+    const maxVal = finite.length ? Math.max(...finite) : 0;
+    const upper = (maxVal > 0) ? (maxVal * 2) : 1;
+    Plotly.relayout(divId, { 'yaxis.autorange': false, 'yaxis.range': [0, upper] });
+  }
+        function updateXAxisTicks(divId, xVals, labels){
+    const tickvals = Array.isArray(xVals) ? xVals : [];
+    const vals = Array.isArray(labels) ? labels : [];
+    const ticktext = [];
+    let prevDate = null;
+    let seen = false;
+    for(let i=0; i<vals.length; i++){
+      const s = String(vals[i] ?? '');
+      const m = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2}(?::\d{2})?)/);
+      let datePart = '', timePart = '';
+      if(m){ datePart = m[1]; timePart = m[2]; }
+      else { const parts = s.split(/\s+/); datePart = parts[0] || ''; timePart = parts[1] || parts[0] || ''; }
+      const hhmm = (timePart || '').split(':').slice(0,2).join(':') || s;
+      const isFirstNonEmpty = (!seen && !!datePart);
+      const dateChanged = datePart && prevDate && (datePart !== prevDate);
+      const showDate = isFirstNonEmpty || dateChanged;
+      const dispDate = datePart ? datePart.split('-').slice(0,3).reverse().join('-') : '';
+      ticktext.push(showDate && datePart ? `${hhmm}<br>${dispDate}` : hhmm);
+      if(datePart){ if(!seen) seen = true; prevDate = datePart; }
+    }
+    Plotly.relayout(divId, { 'xaxis.tickmode': 'array', 'xaxis.tickvals': tickvals, 'xaxis.ticktext': ticktext });
+  }Series.prototype.add = function(key,label,val){
+    if(this.keys.includes(key)) return; 
+    this.y.shift(); this.y.push(val);
+    this.lbl.shift(); this.lbl.push(label);
+    this.keys.shift(); this.keys.push(key);
+    Plotly.update(this.divId, { x: [this.slotIdx], y: [this.y] });
+    updateXAxisTicks(this.divId, this.slotIdx, this.lbl);
+    updateYAxisRange(this.divId, this.y);
+  };
+    Series.prototype.update = function(key,val){
+    const i=this.keys.indexOf(key); if(i===-1) return;
+    this.y[i]=val; 
+    Plotly.restyle(this.divId,{ y:[this.y] });
+    updateXAxisTicks(this.divId, this.slotIdx, this.lbl);
+    updateYAxisRange(this.divId, this.y);
+  };
 
-  initBar('CO2','CO2 ppm','#990000',300,1000);
-  initBar('TEM','Temperatura °C','#006600',20,50);
-  initBar('HUM','Humedad Relativa %','#0000cc',0,100);
+  initBar('CO2','CO2 ppm','#990000', null, null);
+  initBar('TEM','Temperatura °C','#006600', null, null);
+  initBar('HUM','Humedad Relativa %','#0000cc', null, null);
 
   const sCO2=new Series('CO2');
   const sTEM=new Series('TEM');
@@ -115,11 +170,11 @@ window.addEventListener('load', () => {
 
   const db=firebase.database();
   const base=db.ref('/historial_mediciones').orderByKey().limitToLast(MAX_POINTS);
-  let lastMarkerDateISO = null;
+  let lastMarkerDateISO = null; // para tiempo real
   base.once('value',snap=>{
     const obj=snap.val();
     if(!obj)return;
-    const entries = Object.entries(obj).sort(([a],[b])=> (a<b?-1:a>b?1:0));
+    const entries = Object.entries(obj).sort(([a],[b])=> (a<b?-1:a>b?1:0)); // viejo->nuevo
     const inferredDates = inferDatesForEntries(entries);
     entries.forEach(([k,v],idx)=>{
       const dateISO = inferredDates[idx];
@@ -129,6 +184,7 @@ window.addEventListener('load', () => {
       sTEM.add(k,label,v.cTe??0);
       sHUM.add(k,label,Math.round(v.cHu??0));
     });
+    // Elimina solo los mensajes de carga y restaura padding
     document.querySelectorAll('.'+loadingClass).forEach(n=>{
       const parent = n.parentElement;
       n.remove();

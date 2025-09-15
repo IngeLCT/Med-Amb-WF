@@ -17,8 +17,8 @@ window.addEventListener('load', () => {
 
   function initBar(divId, label, color, yMin, yMax) {
     Plotly.newPlot(divId, [{
-      x: [],
-      y: [],
+      x: Array.from({ length: MAX_POINTS }, (_, i) => i),
+      y: new Array(MAX_POINTS).fill(null),
       type: 'bar',
       name: label,
       marker: { color }
@@ -33,13 +33,12 @@ window.addEventListener('load', () => {
           font: { size: 16, color: 'black', family: 'Arial', weight: 'bold' },
           standoff: 20
         },
-        type: 'date',
+        type: 'category',
         tickfont: { color: 'black', size: 14, family: 'Arial', weight: 'bold' },
         gridcolor: 'black',
         linecolor: 'black',
         autorange: true,
         tickangle: -45,
-        nticks: 30
       },
       yaxis: {
         title: {
@@ -51,7 +50,7 @@ window.addEventListener('load', () => {
         linecolor: 'black',
         autorange: true,
         fixedrange: false,
-        range: (yMin !== null && yMax !== null) ? [yMin, yMax] : undefined
+        range: (yMin!==null&&yMax!==null)?[yMin,yMax]:[0, 10]
       },
       plot_bgcolor: '#cce5dc',
       paper_bgcolor: '#cce5dc',
@@ -88,12 +87,59 @@ window.addEventListener('load', () => {
   }
   function makeTimestampWithDate(isoDate, v){ const h = v.hora || v.tiempo || '00:00:00'; return `${isoDate} ${h}`; }
 
-  function Series(divId){ this.divId=divId; this.x=[]; this.y=[]; this.keys=[]; }
-  Series.prototype.add=function(key,label,val){ if(this.keys.includes(key))return; this.keys.push(key); this.x.push(label); this.y.push(val); if(this.x.length>MAX_POINTS){this.x.shift();this.y.shift();this.keys.shift();} Plotly.update(this.divId,{x:[this.x],y:[this.y]}); };
-  Series.prototype.update=function(key,val){ const i=this.keys.indexOf(key); if(i===-1)return; this.y[i]=val; Plotly.restyle(this.divId,{y:[this.y]}); };
+    function Series(divId){
+    this.divId = divId;
+    this.slotIdx = Array.from({ length: MAX_POINTS }, (_, i) => i);
+    this.lbl = new Array(MAX_POINTS).fill('');
+    this.y = new Array(MAX_POINTS).fill(null);
+    this.keys = new Array(MAX_POINTS).fill(null);
+  }
+    function updateYAxisRange(divId, yValues){
+    const finite = (yValues||[]).filter(v => Number.isFinite(v) && v >= 0);
+    const maxVal = finite.length ? Math.max(...finite) : 0;
+    const upper = (maxVal > 0) ? (maxVal * 2) : 1;
+    Plotly.relayout(divId, { 'yaxis.autorange': false, 'yaxis.range': [0, upper] });
+  }
+        function updateXAxisTicks(divId, xVals, labels){
+    const tickvals = Array.isArray(xVals) ? xVals : [];
+    const vals = Array.isArray(labels) ? labels : [];
+    const ticktext = [];
+    let prevDate = null;
+    let seen = false;
+    for(let i=0; i<vals.length; i++){
+      const s = String(vals[i] ?? '');
+      const m = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2}(?::\d{2})?)/);
+      let datePart = '', timePart = '';
+      if(m){ datePart = m[1]; timePart = m[2]; }
+      else { const parts = s.split(/\s+/); datePart = parts[0] || ''; timePart = parts[1] || parts[0] || ''; }
+      const hhmm = (timePart || '').split(':').slice(0,2).join(':') || s;
+      const isFirstNonEmpty = (!seen && !!datePart);
+      const dateChanged = datePart && prevDate && (datePart !== prevDate);
+      const showDate = isFirstNonEmpty || dateChanged;
+      const dispDate = datePart ? datePart.split('-').slice(0,3).reverse().join('-') : '';
+      ticktext.push(showDate && datePart ? `${hhmm}<br>${dispDate}` : hhmm);
+      if(datePart){ if(!seen) seen = true; prevDate = datePart; }
+    }
+    Plotly.relayout(divId, { 'xaxis.tickmode': 'array', 'xaxis.tickvals': tickvals, 'xaxis.ticktext': ticktext });
+  }Series.prototype.add = function(key,label,val){
+    if(this.keys.includes(key)) return; 
+    this.y.shift(); this.y.push(val);
+    this.lbl.shift(); this.lbl.push(label);
+    this.keys.shift(); this.keys.push(key);
+    Plotly.update(this.divId, { x: [this.slotIdx], y: [this.y] });
+    updateXAxisTicks(this.divId, this.slotIdx, this.lbl);
+    updateYAxisRange(this.divId, this.y);
+  };
+    Series.prototype.update = function(key,val){
+    const i=this.keys.indexOf(key); if(i===-1) return;
+    this.y[i]=val; 
+    Plotly.restyle(this.divId,{ y:[this.y] });
+    updateXAxisTicks(this.divId, this.slotIdx, this.lbl);
+    updateYAxisRange(this.divId, this.y);
+  };
 
-  initBar('VOC','VOC index','#ff8000',0,500);
-  initBar('NOx','NOx index','#ff0040',0,100);
+  initBar('VOC','VOC index','#ff8000', null, null);
+  initBar('NOx','NOx index','#ff0040', null, null);
   const sVOC=new Series('VOC');
   const sNOx=new Series('NOx');
 
@@ -112,6 +158,7 @@ window.addEventListener('load', () => {
         sVOC.add(k,label,Math.round(v.voc??0));
         sNOx.add(k,label,Math.round(v.nox??0));
       });
+  // Elimina solo los mensajes de carga y restaura padding
   document.querySelectorAll('.'+loadingClass).forEach(n=>{ const p=n.parentElement; n.remove(); if(p) p.style.paddingTop=''; });
     });
 
@@ -123,86 +170,4 @@ window.addEventListener('load', () => {
     sVOC.add(k,label,Math.round(v?.voc??0)); sNOx.add(k,label,Math.round(v?.nox??0)); 
   });
   db.ref('/historial_mediciones').limitToLast(1).on('child_changed', snap=>{ const k=snap.key,v=snap.val(); sVOC.update(k,Math.round(v.voc??0)); sNOx.update(k,Math.round(v.nox??0)); });
-});
-// grafpart.js
-window.addEventListener("load", () => {
-  const MAX_DATA_POINTS = 20;
-
-  function initPlot(divId, label, color, yMin, yMax) {
-    Plotly.newPlot(divId, [{
-      x: [],
-      y: [],
-      mode: 'lines',
-      name: label,
-      line: { color: color }
-    }], {
-      title: {
-        text: label,
-        font: { size: 20, color: 'black', family: 'Arial', weight: 'bold' }
-      },
-      xaxis: {
-        title: {
-          text: 'Tiempo Transcurrido',
-          font: { size: 16, color: 'black', family: 'Arial', weight: 'bold' },
-          standoff: 20  // separa el título de los ticks
-        },
-        tickfont: {
-          color: 'black',
-          size: 14,
-          family: 'Arial',
-          weight: 'bold'
-        },
-        tickangle: -45,  // puedes ajustar a -30 o -60 si prefieres
-        gridcolor: 'black',
-        linecolor: 'black',
-        zeroline: false
-      },
-      yaxis: {
-        title: {
-          text: label,
-          font: { size: 16, color: 'black', family: 'Arial', weight: 'bold' }
-        },
-        tickfont: { color: 'black', size: 14, family: 'Arial', weight: 'bold' },
-        gridcolor: 'black',
-        linecolor: 'black',
-        zeroline: false,
-        range: (yMin !== null && yMax !== null) ? [yMin, yMax] : undefined
-      },
-      plot_bgcolor: "#cce5dc",
-      paper_bgcolor: "#cce5dc",
-      margin: { t: 50, l: 60, r: 40, b: 80 },  // margen inferior aumentado
-    });
-  }
-
-  function updatePlot(divId, timeLabel, value) {
-    Plotly.extendTraces(divId, {
-      x: [[timeLabel]],
-      y: [[value]]
-    }, [0]);
-
-    const graphDiv = document.getElementById(divId);
-    const xLen = graphDiv.data[0].x.length;
-    if (xLen > MAX_DATA_POINTS) {
-      Plotly.relayout(divId, {
-        'xaxis.range': [xLen - MAX_DATA_POINTS, xLen]
-      });
-    }
-  }
-
-initPlot("VOC", "VOC index", "#ff8000", 0, 500);
-initPlot("NOx", "NOx index", "#ff0040", 0, 200);
-
-const database = firebase.database();
-const ref = database.ref("/ultima_medicion");
-
-  ref.on("value", (snapshot) => {
-    const data = snapshot.val();
-    if (!data) return;
-
-    const timestamp = data.tiempo ?? new Date().toLocaleTimeString();
-
-    updatePlot("VOC", timestamp, data.voc ?? 0);
-    updatePlot("NOx", timestamp, data.nox ?? 0);
-
-  });
 });
