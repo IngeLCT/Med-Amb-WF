@@ -31,7 +31,7 @@ window.addEventListener('load', () => {
         title: {
           text: 'Fecha y Hora de Medición',
           font: { size: 16, color: 'black', family: 'Arial', weight: 'bold' },
-          standoff: 20
+          standoff: 30
         },
         type: 'category',
         tickfont: { color: 'black', size: 14, family: 'Arial', weight: 'bold' },
@@ -54,7 +54,7 @@ window.addEventListener('load', () => {
       },
       plot_bgcolor: '#cce5dc',
       paper_bgcolor: '#cce5dc',
-      margin: { t: 50, l: 60, r: 40, b: 90 },
+      margin: { t: 50, l: 60, r: 40, b: 100 },
       bargap: 0.2
     }, {
       responsive: true,
