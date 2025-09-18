@@ -10,7 +10,9 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
-const sensorDataRef = database.ref('/ultima_medicion');
+// Eliminado el uso de /ultima_medicion. Ahora todo se obtiene desde /historial_mediciones.
+// Referencia en tiempo real al último registro del historial
+const lastMeasurementRef = database.ref('/historial_mediciones').orderByKey().limitToLast(1);
 
 let fechaInicioGlobal = null;
 let horaInicioGlobal = null;

@@ -109,12 +109,13 @@ window.addEventListener('load', () => {
   }
   function makeTimestampWithDate(isoDate, v){ const h = v.hora || v.tiempo || '00:00:00'; return `${isoDate} ${h}`; }
 
-    function Series(divId){
-    this.divId = divId;
-    this.slotIdx = Array.from({ length: MAX_POINTS }, (_, i) => i);
-    this.lbl = new Array(MAX_POINTS).fill('');
-    this.y = new Array(MAX_POINTS).fill(null);
-    this.keys = new Array(MAX_POINTS).fill(null);
+  function Series(divId){
+      this.divId = divId;
+      this.slotIdx = Array.from({ length: MAX_POINTS }, (_, i) => i);
+      this.lbl = new Array(MAX_POINTS).fill('');
+      this.y   = new Array(MAX_POINTS).fill(null);
+      this.keys= new Array(MAX_POINTS).fill(null);
+      this.count = 0; // <<-- NUEVO: cuántos puntos válidos hay ya pintados (0..MAX_POINTS)
   }
     function updateYAxisRange(divId, yValues){
     const finite = (yValues||[]).filter(v => Number.isFinite(v) && v >= 0);
@@ -143,12 +144,28 @@ window.addEventListener('load', () => {
       if(datePart){ if(!seen) seen = true; prevDate = datePart; }
     }
     Plotly.relayout(divId, { 'xaxis.tickmode': 'array', 'xaxis.tickvals': tickvals, 'xaxis.ticktext': ticktext });
-  }Series.prototype.add = function(key,label,val){
-    if(this.keys.includes(key)) return; 
-    this.y.shift(); this.y.push(val);
-    this.lbl.shift(); this.lbl.push(label);
-    this.keys.shift(); this.keys.push(key);
-    Plotly.update(this.divId, { x: [this.slotIdx], y: [this.y] });
+  }Series.prototype.add = function(key, label, value) {
+    if (this.keys.includes(key)) return; // evitar duplicados
+
+    if (this.count < MAX_POINTS) {
+      // Aún no está llena la serie: coloca de IZQ -> DER
+      const idx = this.count;
+      this.y[idx]    = value;
+      this.lbl[idx]  = label;
+      this.keys[idx] = key;
+      this.count++;
+
+      // Actualiza trazado
+      Plotly.update(this.divId, { x: [this.slotIdx], y: [this.y] });
+    } else {
+      // Ventana llena (24): desliza IZQ, agrega DER (tu comportamiento actual)
+      this.y.shift();    this.y.push(value);
+      this.lbl.shift();  this.lbl.push(label);
+      this.keys.shift(); this.keys.push(key);
+
+      Plotly.update(this.divId, { x: [this.slotIdx], y: [this.y] });
+    }
+
     updateXAxisTicks(this.divId, this.slotIdx, this.lbl);
     updateYAxisRange(this.divId, this.y);
   };

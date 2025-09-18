@@ -91,7 +91,7 @@ function getBarColor(dataLabel) {
     if (label.includes('temperatura') || label.includes('temp') || label.includes('cte')) return '#006600'; // Temperatura
     if (label.includes('humedad') || label.includes('hum') || label.includes('chu')) return '#0000cc'; // Humedad
     if (label.includes('voc')) return '#ff8000'; // VOC
-    if (label.includes('nox')) return '#ff0040'; // NOx
+    if (label.includes('nox')) return '#00ff00'; // NOx
     // Puedes agregar más reglas aquí si tienes más mediciones
     return '#000066'; // color por defecto
 }
