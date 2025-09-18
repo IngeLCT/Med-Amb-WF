@@ -152,7 +152,7 @@ function createOrUpdatePlotly(dataToChart, dataLabel, timeLabels) {
         },
         plot_bgcolor: "#cce5dc",
         paper_bgcolor: "#cce5dc",
-        margin: { t: 50, l: 60, r: 40, b: 100 }
+        margin: { t: 50, l: 60, r: 40, b: 110 }
     };
 
     Plotly.newPlot(chartContainer, [trace], layout, {
