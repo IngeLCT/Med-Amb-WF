@@ -29,7 +29,13 @@ th {
 }
 #time-info {
   font-size: 20px;
+  margin-top: 2px;
+}
+#T-I-Static {
+  font-size: 20px;
   margin-top: 30px;
+  /* line-height: calc(var(--lh) * 1em);  1.2 * 20px = 24px */
+  margin-bottom: 2px; /* calc(var(--lh) * 1em);   mismo valor que line-height */
 }
 nav {
   margin-bottom: 20px;

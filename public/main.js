@@ -10,94 +10,147 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
-// Eliminado el uso de /ultima_medicion. Ahora todo se obtiene desde /historial_mediciones.
-// Referencia en tiempo real al último registro del historial
-const lastMeasurementRef = database.ref('/historial_mediciones').orderByKey().limitToLast(1);
 
-let fechaInicioGlobal = null;
-let horaInicioGlobal = null;
-let ubicacionGlobal = null;
-let ESPIDGlobal = null;
+// --- Estado global "estático" (se fija con el primer dato y cambia la fecha solo si es otro día)
+let fechaInicioGlobal = null;   // cambia si cambia el día reportado
+let horaInicioGlobal = null;    // primera recibida
+let ubicacionGlobal = null;     // primera recibida
+let ESPIDGlobal = null;         // primera recibida
+
+// --- Estado "dinámico" (último dato)
 let ultimaFechaGlobal = null;
 
-// Preparar tabla vacía con encabezados y mensaje "Esperando Datos" arriba
+// ---- Utilidades UI
 function prepararTablaVacia() {
   const tbl = document.getElementById('data-table');
   if (tbl && !tbl.dataset.prepared) {
     tbl.dataset.prepared = '1';
     tbl.innerHTML = `
       <tr> <th>Mediciones</th> <th>Valor</th> <th>Unidad</th> </tr>
-    `; // sin filas de datos todavía
+    `;
   }
   if (!document.getElementById('waiting-msg')) {
     const msg = document.createElement('div');
     msg.id = 'waiting-msg';
-    msg.style.cssText = 'margin:10px 0;font-size:20px;font-weight:bold;color:#154360;letter-spacing:.5px;text-align:left;';
-    msg.textContent = 'Esperando Datos';
+    msg.style.cssText = [
+      'margin:20px 0',
+      'width:100%',
+      'display:block',
+      'text-align:center',
+      'font-size:32px',
+      'font-weight:700',
+      'color:#000'
+    ].join(';');
+    msg.textContent = 'Esperando Datos...';
     const tableEl = document.getElementById('data-table');
     if (tableEl && tableEl.parentNode) {
-      tableEl.parentNode.insertBefore(msg, tableEl); // insertar arriba de la tabla
+      tableEl.parentNode.insertBefore(msg, tableEl);
     }
   }
 }
 
-// Ejecutar una vez al cargar el script (si el DOM ya está) o esperar al load
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', prepararTablaVacia);
 } else {
   prepararTablaVacia();
 }
 
-// Al iniciar la página, leer el primer registro del historial
-const historialRef = database.ref('/historial_mediciones').orderByKey().limitToFirst(1);
+// ---- Helpers
+function isValidStr(v) {
+  return v !== undefined && v !== null && String(v).trim() !== '' && String(v).toLowerCase() !== 'nan';
+}
 
-historialRef.once('value', (snapshot) => {
-  const firstEntry = snapshot.val();
-  if (firstEntry) {
-    const entry = Object.values(firstEntry)[0];
-    fechaInicioGlobal = entry.fecha || null;
-    horaInicioGlobal = entry.inicio || null;
-    ubicacionGlobal = entry.ciudad || null;
-    ESPIDGlobal = entry.id || null;
+function hasAnyStatic() {
+  return [ESPIDGlobal, horaInicioGlobal, ubicacionGlobal, fechaInicioGlobal]
+    .some(isValidStr);
+}
+
+function clearStaticInfoUI() {
+  const staticP = document.getElementById('T-I-Static');
+  const idEl = document.getElementById('ID');
+  if (staticP) staticP.innerHTML = '';
+  if (idEl) idEl.innerHTML = '';
+}
+
+function updateStaticInfoUI() {
+  if (!hasAnyStatic()) {
+    clearStaticInfoUI();
+    return;
   }
-});
+  const staticP = document.getElementById('T-I-Static');
+  const idEl = document.getElementById('ID');
 
-// Bootstrap: find the last known fecha among the latest records
-const ultFechaQuery = database.ref('/historial_mediciones').orderByKey().limitToLast(200);
-ultFechaQuery.once('value', snap => {
-  const obj = snap.val() || {};
-  const entries = Object.values(obj);
-  for(let i = entries.length - 1; i >= 0; i--){
-    const f = entries[i] && entries[i].fecha;
-    if (f && String(f).trim() !== '' && String(f).toLowerCase() !== 'nan'){
-      ultimaFechaGlobal = f;
-      if (!renderUltimaMedicion.ultimaFecha) renderUltimaMedicion.ultimaFecha = f;
-      break;
+  if (staticP) {
+    staticP.innerHTML =
+      '<strong>Fecha de inicio:</strong> ' + (fechaInicioGlobal ?? '') + ' <br>' +
+      '<strong>Hora de inicio:</strong> ' + (horaInicioGlobal ?? '') + '<br>' +
+      '<strong>Ubicación:</strong> ' + (ubicacionGlobal ?? '');
+  }
+  if (idEl) {
+    idEl.innerHTML = `<strong>ID:</strong> ${ESPIDGlobal ?? ''}<br>`;
+  }
+}
+
+// ---- Escucha para fijar datos estáticos (y actualizar fecha si cambia de día)
+function listenStaticFields() {
+  // 1) Primer registro histórico
+  database.ref('/historial_mediciones').orderByKey().limitToFirst(1).once('value', (snap) => {
+    const firstObj = snap.val();
+    if (firstObj) {
+      const entry = Object.values(firstObj)[0] || {};
+      if (ESPIDGlobal == null && isValidStr(entry.id)) ESPIDGlobal = entry.id;
+      if (horaInicioGlobal == null && isValidStr(entry.inicio)) horaInicioGlobal = entry.inicio;
+      if (ubicacionGlobal == null && isValidStr(entry.ciudad)) ubicacionGlobal = entry.ciudad;
+      if (fechaInicioGlobal == null && isValidStr(entry.fecha)) fechaInicioGlobal = entry.fecha;
+      updateStaticInfoUI();         // <- pinta porque sí hay datos
+    } else {
+      clearStaticInfoUI();          // <- AHORA: sin datos, deja vacío
     }
-  }
-});
+  });
 
-// Función de render reutilizable
+  // 2) Último registro para completar/actualizar
+  const newestRef = database.ref('/historial_mediciones').limitToLast(1);
+  const onAdded = (snap) => {
+    const entry = snap.val() || {};
+    if (ESPIDGlobal == null && isValidStr(entry.id)) ESPIDGlobal = entry.id;
+    if (horaInicioGlobal == null && isValidStr(entry.inicio)) horaInicioGlobal = entry.inicio;
+    if (ubicacionGlobal == null && isValidStr(entry.ciudad)) ubicacionGlobal = entry.ciudad;
+
+    if (isValidStr(entry.fecha)) {
+      if (fechaInicioGlobal !== entry.fecha) fechaInicioGlobal = entry.fecha; // cambia solo si es otro día
+      ultimaFechaGlobal = entry.fecha;
+    }
+    updateStaticInfoUI();           // pinta cuando llega el primer dato
+  };
+
+  newestRef.on('child_added', onAdded);
+  newestRef.on('child_changed', onAdded);
+}
+listenStaticFields();
+
+// ---- Render del último dato (solo tabla + última fecha/hora)
 function renderUltimaMedicion(data) {
   if (!data) return;
-  // Quitar mensaje de espera si existe
+
   const wait = document.getElementById('waiting-msg');
   if (wait) wait.remove();
-  if (!renderUltimaMedicion.first) {
-    renderUltimaMedicion.first = true; // primera vez
-  }
+
   const dataTable = document.getElementById("data-table");
   const timeInfo = document.getElementById("time-info");
-  const IDBCursor = document.getElementById("ID");
-  // Hora más reciente
-  renderUltimaMedicion.ultimaHora = data.hora || renderUltimaMedicion.ultimaHora || '---';
-  renderUltimaMedicion.ultimaFecha = (data.fecha && String(data.fecha).trim() !== '' && String(data.fecha).toLowerCase() !== 'nan') ? data.fecha : (renderUltimaMedicion.ultimaFecha || ultimaFechaGlobal || fechaInicioGlobal || '---');
 
-  // Asegurar que encabezado exista (si alguien limpió la tabla)
+  // Mantén última hora/fecha válidas
+  renderUltimaMedicion.ultimaHora =
+    isValidStr(data.hora) ? data.hora : (renderUltimaMedicion.ultimaHora || '---');
+
+  const fCandidata = isValidStr(data.fecha) ? data.fecha
+                    : (renderUltimaMedicion.ultimaFecha || ultimaFechaGlobal || fechaInicioGlobal || '---');
+  renderUltimaMedicion.ultimaFecha = fCandidata;
+
+  // Encabezado asegurado
   if (!dataTable.querySelector('th')) {
     dataTable.innerHTML = '<tr> <th>Mediciones</th> <th>Valor</th> <th>Unidad</th> </tr>';
   }
-  // Construir filas de datos (sin reponer encabezado)
+
   const rows = [
     `<tr> <td>PM1.0</td> <td>${data.pm1p0 ?? '0'}</td> <td>µg/m³</td> </tr>`,
     `<tr> <td>PM2.5</td> <td>${data.pm2p5 ?? '0'}</td> <td>µg/m³</td> </tr>`,
@@ -109,37 +162,27 @@ function renderUltimaMedicion(data) {
     `<tr> <td>Temperatura</td> <td>${data.cTe ?? '0'}</td> <td>°C</td> </tr>`,
     `<tr> <td>Humedad Relativa</td> <td>${Math.round(data.cHu ?? 0)}</td> <td>%</td> </tr>`
   ];
-  // Reemplazar todo menos el encabezado
   const header = dataTable.querySelector('tr');
   dataTable.innerHTML = header.outerHTML + rows.join('');
 
-  // NO MODIFICAR
-  timeInfo.innerHTML = '' +
-    '<strong>Fecha de inicio:</strong> ' + (fechaInicioGlobal ?? '---') + ' <br>' +
-    '<strong>Hora de inicio:</strong> ' + (horaInicioGlobal ?? '---') + '<br>' +
-    '<strong>Ubicacion:</strong> ' + (ubicacionGlobal ?? '---') + '<br>' +
-    '<strong>Fecha Ultima Medición:</strong> ' + (renderUltimaMedicion.ultimaFecha) + '<br>' +
-    '<strong>Hora Ultima Medición:</strong> ' + (renderUltimaMedicion.ultimaHora);
-
-
-  // NO MODIFICAR
-  IDBCursor.innerHTML= `
-  <strong>ID:</strong> ${ESPIDGlobal ?? '---'}  <br>
-  `;
+  // >>> SOLO ÚLTIMA FECHA/HORA <<<
+  if (timeInfo) {
+    timeInfo.innerHTML =
+      '<strong>Fecha Última Medición:</strong> ' + (renderUltimaMedicion.ultimaFecha) + '<br>' +
+      '<strong>Hora Última Medición:</strong> ' + (renderUltimaMedicion.ultimaHora);
+  }
 }
 
-// Suscripción a nuevos registros y cambios sobre el último
+// ---- Suscripciones del "último" registro para render dinámico
 const historialRootRef = database.ref('/historial_mediciones');
-// child_added se dispara para el último existente (por limitToLast) y luego para cada nuevo push
 historialRootRef.limitToLast(1).on('child_added', snap => {
   renderUltimaMedicion(snap.val());
 });
-// Si el último registro se actualiza después de creado
 historialRootRef.limitToLast(1).on('child_changed', snap => {
   renderUltimaMedicion(snap.val());
 });
 
-// CSV
+// ---- CSV (igual que lo tenías, respeta los globales)
 function descargarCSV() {
   const historialRef = database.ref('/historial_mediciones');
 
@@ -172,17 +215,6 @@ function descargarCSV() {
       "HoraMedicion": "hora"
     };
 
-    function parseFechaHora(fechaStr, horaStr) {
-      // fechaStr: dd-mm-YYYY, horaStr: hh:mm:ss
-      if (!fechaStr || typeof fechaStr !== 'string') fechaStr = '00-00-00';
-      if (!horaStr || typeof horaStr !== 'string') horaStr = '00:00:00';
-      // Convertir fecha a formato YYYYMMDD
-      const [d, m, fullYear] = fechaStr.split('-').map(Number);
-      // Convertir hora a segundos
-      const [h, min, s] = horaStr.split(':').map(Number);
-      return fullYear * 10000 + (m || 0) * 100 + (d || 0) + (h || 0) / 100 + (min || 0) / 10000 + (s || 0) / 1000000;
-    }
-    // Respeta el orden de inserción de Firebase
     const entries = Object.values(data);
     let csv = headers.join(",") + "\n";
     let lastFecha = fechaInicioGlobal;
@@ -191,28 +223,17 @@ function descargarCSV() {
         const actualKey = keyMap[key];
         let value = entry[actualKey];
 
-        // Para la fecha, actualiza solo si existe una nueva
         if (key === "fechaDeMedicion") {
-          if (value && value !== "" && value !== undefined && value !== null && String(value).toLowerCase() !== "nan") {
-            lastFecha = value;
-          }
+          if (isValidStr(value)) lastFecha = value;
           value = lastFecha ?? "0";
         }
-        // Hora de inicio y ubicación se mantienen igual
         if (key === "HoraDeInicio") value = horaInicioGlobal ?? value;
         if (key === "ubicacion") value = ubicacionGlobal ?? value;
-        // Redondear VOC, NOx y Humedad Relativa
+
         if (["voc","nox","HumedadRelativa"].includes(key)) {
           value = Math.round(Number(value) || 0);
         }
-        if (
-          value === undefined ||
-          value === null ||
-          value === '' ||
-          String(value).toLowerCase() === 'nan'
-        ) {
-          return "0";
-        }
+        if (!isValidStr(value)) return "0";
         return value;
       }).join(",");
       csv += row + "\n";
@@ -229,4 +250,3 @@ function descargarCSV() {
     URL.revokeObjectURL(url);
   });
 }
-
