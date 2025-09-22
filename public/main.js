@@ -18,7 +18,9 @@ let ubicacionGlobal = null;     // primera recibida
 let ESPIDGlobal = null;         // primera recibida
 
 // --- Estado "dinámico" (último dato)
-let ultimaFechaGlobal = null;
+let ultimaFechaGlobal = null;   // última 'fecha' realmente recibida en la BD
+let ultimaHoraGlobal  = null;   // última 'hora' recibida
+
 
 // ---- Utilidades UI
 function prepararTablaVacia() {
@@ -60,6 +62,23 @@ function isValidStr(v) {
   return v !== undefined && v !== null && String(v).trim() !== '' && String(v).toLowerCase() !== 'nan';
 }
 
+
+function updateTimeInfoUI() {
+  const timeInfo = document.getElementById("time-info");
+  if (!timeInfo) return;
+
+  // Si no hay nada aún, no mostramos nada
+  const hayAlgo = (v) => v !== null && v !== undefined && String(v).trim() !== "";
+  if (!hayAlgo(ultimaFechaGlobal) && !hayAlgo(ultimaHoraGlobal)) {
+    timeInfo.innerHTML = "";
+    return;
+  }
+    timeInfo.innerHTML =
+    '<strong>Fecha Última Medición:</strong> ' + (ultimaFechaGlobal ?? '') + '<br>' +
+    '<strong>Hora Última Medición:</strong> ' + (ultimaHoraGlobal ?? '');
+}
+
+// ===== NUEVO: helpers para controlar el pintado de estáticos =====
 function hasAnyStatic() {
   return [ESPIDGlobal, horaInicioGlobal, ubicacionGlobal, fechaInicioGlobal]
     .some(isValidStr);
@@ -90,6 +109,24 @@ function updateStaticInfoUI() {
     idEl.innerHTML = `<strong>ID:</strong> ${ESPIDGlobal ?? ''}<br>`;
   }
 }
+
+// ---- Semilla: buscar en la "cola" la última 'fecha' no vacía
+function seedUltimaFechaDesdeCola() {
+  database.ref('/historial_mediciones')
+    .limitToLast(2000)               // ajusta si tu día supera este número de muestras
+    .once('value', (snap) => {
+      let ultima = null;
+      snap.forEach(child => {
+        const e = child.val() || {};
+        if (isValidStr(e.fecha)) ultima = e.fecha;  // la última no vacía que aparezca
+      });
+      if (ultima) {
+        ultimaFechaGlobal = ultima;
+        updateTimeInfoUI();
+      }
+    });
+}
+seedUltimaFechaDesdeCola();
 
 // ---- Escucha para fijar datos estáticos (y actualizar fecha si cambia de día)
 function listenStaticFields() {
@@ -126,6 +163,7 @@ function listenStaticFields() {
   newestRef.on('child_added', onAdded);
   newestRef.on('child_changed', onAdded);
 }
+
 listenStaticFields();
 
 // ---- Render del último dato (solo tabla + última fecha/hora)
@@ -136,21 +174,13 @@ function renderUltimaMedicion(data) {
   if (wait) wait.remove();
 
   const dataTable = document.getElementById("data-table");
-  const timeInfo = document.getElementById("time-info");
-
-  // Mantén última hora/fecha válidas
-  renderUltimaMedicion.ultimaHora =
-    isValidStr(data.hora) ? data.hora : (renderUltimaMedicion.ultimaHora || '---');
-
-  const fCandidata = isValidStr(data.fecha) ? data.fecha
-                    : (renderUltimaMedicion.ultimaFecha || ultimaFechaGlobal || fechaInicioGlobal || '---');
-  renderUltimaMedicion.ultimaFecha = fCandidata;
 
   // Encabezado asegurado
   if (!dataTable.querySelector('th')) {
     dataTable.innerHTML = '<tr> <th>Mediciones</th> <th>Valor</th> <th>Unidad</th> </tr>';
   }
 
+  // --- TABLA (igual que antes)
   const rows = [
     `<tr> <td>PM1.0</td> <td>${data.pm1p0 ?? '0'}</td> <td>µg/m³</td> </tr>`,
     `<tr> <td>PM2.5</td> <td>${data.pm2p5 ?? '0'}</td> <td>µg/m³</td> </tr>`,
@@ -165,22 +195,44 @@ function renderUltimaMedicion(data) {
   const header = dataTable.querySelector('tr');
   dataTable.innerHTML = header.outerHTML + rows.join('');
 
-  // >>> SOLO ÚLTIMA FECHA/HORA <<<
-  if (timeInfo) {
-    timeInfo.innerHTML =
-      '<strong>Fecha Última Medición:</strong> ' + (renderUltimaMedicion.ultimaFecha) + '<br>' +
-      '<strong>Hora Última Medición:</strong> ' + (renderUltimaMedicion.ultimaHora);
+  // --- Ya no se escribe en #time-info aquí.
+  // (opcional) Actualiza solo la hora de último dato si vino:
+  if (isValidStr(data.hora)) {
+    ultimaHoraGlobal = data.hora;
+    updateTimeInfoUI();
   }
 }
 
 // ---- Suscripciones del "último" registro para render dinámico
 const historialRootRef = database.ref('/historial_mediciones');
+
 historialRootRef.limitToLast(1).on('child_added', snap => {
-  renderUltimaMedicion(snap.val());
+  const data = snap.val() || {};
+  // Actualiza hora si viene
+  if (isValidStr(data.hora)) {
+    ultimaHoraGlobal = data.hora;
+    updateTimeInfoUI();
+  }
+  // Si este último trae 'fecha', úsala como la última recibida
+  if (isValidStr(data.fecha)) {
+    ultimaFechaGlobal = data.fecha;
+    updateTimeInfoUI();
+  }
+  renderUltimaMedicion(data); // <-- ahora solo tabla
 });
+
 historialRootRef.limitToLast(1).on('child_changed', snap => {
-  renderUltimaMedicion(snap.val());
-});
+  const data = snap.val() || {};
+  if (isValidStr(data.hora)) {
+    ultimaHoraGlobal = data.hora;
+    updateTimeInfoUI();
+  }
+  if (isValidStr(data.fecha)) {
+    ultimaFechaGlobal = data.fecha;
+    updateTimeInfoUI();
+  }
+  renderUltimaMedicion(data);
+})
 
 // ---- CSV (igual que lo tenías, respeta los globales)
 function descargarCSV() {
