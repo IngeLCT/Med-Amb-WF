@@ -1,3 +1,4 @@
+// main.js —
 const firebaseConfig = {
   apiKey: "AIzaSyAowEsndAOgwtEIfBABbq_GKNTX3bHh_VM",
   authDomain: "calidadaire-677f9.firebaseapp.com",
@@ -21,6 +22,72 @@ let ESPIDGlobal = null;         // primera recibida
 let ultimaFechaGlobal = null;   // última 'fecha' realmente recibida en la BD
 let ultimaHoraGlobal  = null;   // última 'hora' recibida
 
+// --- Alerta por inactividad (30 min)
+const UMBRAL_MINUTOS_SIN_ACT = 30;
+let recibioAlgunaMedicion = false;  // se activa con el PRIMER evento vivo
+let ultimaActualizacionMs = null;   // Date.now() del último evento vivo
+let idIntervaloVigilante = null;
+let alertaMostrada = false;
+
+function iniciarVigilante() {
+  if (idIntervaloVigilante) return;
+  idIntervaloVigilante = setInterval(() => {
+    if (!recibioAlgunaMedicion || !ultimaActualizacionMs) return;
+    const mins = (Date.now() - ultimaActualizacionMs) / 60000;
+    if (mins >= UMBRAL_MINUTOS_SIN_ACT) {
+      mostrarAlertaInactividad(Math.floor(mins));
+    }
+  }, 60 * 1000); // revisa cada minuto
+}
+
+function mostrarAlertaInactividad(mins) {
+  if (alertaMostrada) return;
+  alertaMostrada = true;
+
+  let banner = document.getElementById('stale-alert');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'stale-alert';
+    banner.style.cssText = [
+      'position:fixed','left:0','right:0','bottom:0','z-index:9999',
+      'padding:12px 16px','background:#ffd1d1','color:#8b0000',
+      'border-top:2px solid #8b0000','font-weight:600','text-align:center'
+    ].join(';');
+
+    const span = document.createElement('span');
+    span.id = 'stale-alert-text';
+    span.textContent = 'Sin actualizaciones en los últimos 30 minutos.';
+    banner.appendChild(span);
+
+    const btn = document.createElement('button');
+    btn.textContent = 'Cerrar';
+    btn.style.cssText = 'margin-left:12px;padding:4px 8px;font-weight:600';
+    btn.onclick = () => { alertaMostrada = false; banner.remove(); };
+    banner.appendChild(btn);
+
+    document.body.appendChild(banner);
+  } else {
+    const span = document.getElementById('stale-alert-text');
+    if (span) span.textContent = `Sin actualizaciones en los últimos 30 minutos (≈${mins} min).`;
+  }
+
+  // Llamada de atención: una vez
+  try { alert('Aviso: No se han recibido actualizaciones en 30 minutos.'); } catch (e) {}
+}
+
+function limpiarAlertaInactividad() {
+  alertaMostrada = false;
+  const banner = document.getElementById('stale-alert');
+  if (banner) banner.remove();
+}
+
+function marcaActualizacionReciente() {
+  // Se llama únicamente cuando llega un evento vivo (child_added/changed limitToLast(1))
+  recibioAlgunaMedicion = true;
+  ultimaActualizacionMs = Date.now();
+  limpiarAlertaInactividad();
+  iniciarVigilante();
+}
 
 // ---- Utilidades UI
 function prepararTablaVacia() {
@@ -62,18 +129,16 @@ function isValidStr(v) {
   return v !== undefined && v !== null && String(v).trim() !== '' && String(v).toLowerCase() !== 'nan';
 }
 
-
 function updateTimeInfoUI() {
   const timeInfo = document.getElementById("time-info");
   if (!timeInfo) return;
 
-  // Si no hay nada aún, no mostramos nada
   const hayAlgo = (v) => v !== null && v !== undefined && String(v).trim() !== "";
   if (!hayAlgo(ultimaFechaGlobal) && !hayAlgo(ultimaHoraGlobal)) {
     timeInfo.innerHTML = "";
     return;
   }
-    timeInfo.innerHTML =
+  timeInfo.innerHTML =
     '<strong>Fecha Última Medición:</strong> ' + (ultimaFechaGlobal ?? '') + '<br>' +
     '<strong>Hora Última Medición:</strong> ' + (ultimaHoraGlobal ?? '');
 }
@@ -163,7 +228,6 @@ function listenStaticFields() {
   newestRef.on('child_added', onAdded);
   newestRef.on('child_changed', onAdded);
 }
-
 listenStaticFields();
 
 // ---- Render del último dato (solo tabla + última fecha/hora)
@@ -180,7 +244,7 @@ function renderUltimaMedicion(data) {
     dataTable.innerHTML = '<tr> <th>Mediciones</th> <th>Valor</th> <th>Unidad</th> </tr>';
   }
 
-  // --- TABLA (igual que antes)
+  // --- TABLA
   const rows = [
     `<tr> <td>PM1.0</td> <td>${data.pm1p0 ?? '0'}</td> <td>µg/m³</td> </tr>`,
     `<tr> <td>PM2.5</td> <td>${data.pm2p5 ?? '0'}</td> <td>µg/m³</td> </tr>`,
@@ -195,8 +259,7 @@ function renderUltimaMedicion(data) {
   const header = dataTable.querySelector('tr');
   dataTable.innerHTML = header.outerHTML + rows.join('');
 
-  // --- Ya no se escribe en #time-info aquí.
-  // (opcional) Actualiza solo la hora de último dato si vino:
+  // Actualiza la hora del último dato si vino:
   if (isValidStr(data.hora)) {
     ultimaHoraGlobal = data.hora;
     updateTimeInfoUI();
@@ -208,17 +271,18 @@ const historialRootRef = database.ref('/historial_mediciones');
 
 historialRootRef.limitToLast(1).on('child_added', snap => {
   const data = snap.val() || {};
-  // Actualiza hora si viene
   if (isValidStr(data.hora)) {
     ultimaHoraGlobal = data.hora;
     updateTimeInfoUI();
   }
-  // Si este último trae 'fecha', úsala como la última recibida
   if (isValidStr(data.fecha)) {
     ultimaFechaGlobal = data.fecha;
     updateTimeInfoUI();
   }
-  renderUltimaMedicion(data); // <-- ahora solo tabla
+  renderUltimaMedicion(data);
+
+  // Marca que llegó un evento vivo y arranca/reinicia el conteo de 30 min
+  marcaActualizacionReciente();
 });
 
 historialRootRef.limitToLast(1).on('child_changed', snap => {
@@ -232,7 +296,10 @@ historialRootRef.limitToLast(1).on('child_changed', snap => {
     updateTimeInfoUI();
   }
   renderUltimaMedicion(data);
-})
+
+  // Marca que llegó un evento vivo y arranca/reinicia el conteo de 30 min
+  marcaActualizacionReciente();
+});
 
 // ---- CSV (igual que lo tenías, respeta los globales)
 function descargarCSV() {
