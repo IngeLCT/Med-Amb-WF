@@ -23,7 +23,7 @@ let ultimaFechaGlobal = null;   // última 'fecha' realmente recibida en la BD
 let ultimaHoraGlobal  = null;   // última 'hora' recibida
 
 // --- Alerta por inactividad (30 min)
-const UMBRAL_MINUTOS_SIN_ACT = 30;
+const UMBRAL_MINUTOS_SIN_ACT = 10;
 let recibioAlgunaMedicion = false;  // se activa con el PRIMER evento vivo
 let ultimaActualizacionMs = null;   // Date.now() del último evento vivo
 let idIntervaloVigilante = null;
