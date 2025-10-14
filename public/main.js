@@ -29,6 +29,33 @@ let ultimaActualizacionMs = null;   // Date.now() del último evento vivo
 let idIntervaloVigilante = null;
 let alertaMostrada = false;
 
+let timerStale = null;
+
+function programarAlarma(msFromData) {
+  // msFromData = timestamp (ms) de la última medición (fecha+hora parseadas)
+  const now = Date.now();
+  const base = (typeof msFromData === 'number') ? Math.min(msFromData, now) : now;
+  const transcurrido = now - base;
+  const umbralMs = UMBRAL_MINUTOS_SIN_ACT * 60000;
+  const restante = umbralMs - transcurrido;
+
+  // Limpia cualquier alarma previa
+  if (timerStale) clearTimeout(timerStale);
+
+  // Si ya venció al cargar, alerta de inmediato
+  if (restante <= 0) {
+    const mins = Math.floor(transcurrido / 60000);
+    mostrarAlertaInactividad(mins);
+    return;
+  }
+
+  // Programa disparo exacto
+  timerStale = setTimeout(() => {
+    const mins = Math.floor((Date.now() - base) / 60000);
+    mostrarAlertaInactividad(mins);
+  }, Math.max(restante, 1000));
+}
+
 function iniciarVigilante() {
   if (idIntervaloVigilante) return;
   idIntervaloVigilante = setInterval(() => {
@@ -56,7 +83,7 @@ function mostrarAlertaInactividad(mins) {
 
     const span = document.createElement('span');
     span.id = 'stale-alert-text';
-    span.textContent = 'Sin actualizaciones en los últimos 30 minutos.';
+    span.textContent = `Sin actualizaciones en los últimos ${UMBRAL_MINUTOS_SIN_ACT} minutos.`;
     banner.appendChild(span);
 
     const btn = document.createElement('button');
@@ -68,7 +95,7 @@ function mostrarAlertaInactividad(mins) {
     document.body.appendChild(banner);
   } else {
     const span = document.getElementById('stale-alert-text');
-    if (span) span.textContent = `Sin actualizaciones en los últimos 30 minutos (≈${mins} min).`;
+    if (span) span.textContent = `Sin actualizaciones en los últimos ${UMBRAL_MINUTOS_SIN_ACT} minutos (≈${mins} min).`;
   }
 
   // Llamada de atención: una vez
@@ -81,12 +108,12 @@ function limpiarAlertaInactividad() {
   if (banner) banner.remove();
 }
 
-function marcaActualizacionReciente() {
-  // Se llama únicamente cuando llega un evento vivo (child_added/changed limitToLast(1))
+function marcaActualizacionReciente(msFromData) {
   recibioAlgunaMedicion = true;
-  ultimaActualizacionMs = Date.now();
+  ultimaActualizacionMs = (typeof msFromData === 'number') ? Math.min(msFromData, Date.now()) : Date.now();
   limpiarAlertaInactividad();
-  iniciarVigilante();
+  iniciarVigilante();          // puedes dejarlo como “respaldo” si quieres
+  programarAlarma(msFromData); // <- disparo exacto al llegar al umbral
 }
 
 // ---- Utilidades UI
@@ -282,7 +309,7 @@ historialRootRef.limitToLast(1).on('child_added', snap => {
   renderUltimaMedicion(data);
 
   // Marca que llegó un evento vivo y arranca/reinicia el conteo de 30 min
-  marcaActualizacionReciente();
+  marcaActualizacionReciente(msData);
 });
 
 historialRootRef.limitToLast(1).on('child_changed', snap => {
@@ -298,7 +325,7 @@ historialRootRef.limitToLast(1).on('child_changed', snap => {
   renderUltimaMedicion(data);
 
   // Marca que llegó un evento vivo y arranca/reinicia el conteo de 30 min
-  marcaActualizacionReciente();
+  marcaActualizacionReciente(msData);
 });
 
 // ---- CSV (igual que lo tenías, respeta los globales)
