@@ -298,6 +298,7 @@ const historialRootRef = database.ref('/historial_mediciones');
 
 historialRootRef.limitToLast(1).on('child_added', snap => {
   const data = snap.val() || {};
+  const msData = parseFechaHoraMs(data.fecha, data.hora);
   if (isValidStr(data.hora)) {
     ultimaHoraGlobal = data.hora;
     updateTimeInfoUI();
@@ -314,6 +315,7 @@ historialRootRef.limitToLast(1).on('child_added', snap => {
 
 historialRootRef.limitToLast(1).on('child_changed', snap => {
   const data = snap.val() || {};
+  const msData = parseFechaHoraMs(data.fecha, data.hora);
   if (isValidStr(data.hora)) {
     ultimaHoraGlobal = data.hora;
     updateTimeInfoUI();
