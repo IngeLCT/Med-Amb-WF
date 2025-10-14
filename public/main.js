@@ -1,4 +1,5 @@
-// main.js —
+// main.js — Limpio y usando stale-alert.js para la alerta de inactividad
+
 const firebaseConfig = {
   apiKey: "AIzaSyAowEsndAOgwtEIfBABbq_GKNTX3bHh_VM",
   authDomain: "calidadaire-677f9.firebaseapp.com",
@@ -12,132 +13,23 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
+// Inicializa la librería de alerta (definida en stale-alert.js)
+if (typeof window.staleInit === "function") {
+  // Ajusta el umbral aquí (minutos)
+  window.staleInit({ thresholdMinutes: 10 });
+} else {
+  console.warn("stale-alert.js no está cargado; no habrá alerta por inactividad.");
+}
+
 // --- Estado global "estático" (se fija con el primer dato y cambia la fecha solo si es otro día)
 let fechaInicioGlobal = null;   // cambia si cambia el día reportado
-let horaInicioGlobal = null;    // primera recibida
-let ubicacionGlobal = null;     // primera recibida
-let ESPIDGlobal = null;         // primera recibida
+let horaInicioGlobal  = null;   // primera recibida
+let ubicacionGlobal   = null;   // primera recibida
+let ESPIDGlobal       = null;   // primera recibida
 
 // --- Estado "dinámico" (último dato)
 let ultimaFechaGlobal = null;   // última 'fecha' realmente recibida en la BD
 let ultimaHoraGlobal  = null;   // última 'hora' recibida
-
-// --- Alerta por inactividad (30 min)
-const UMBRAL_MINUTOS_SIN_ACT = 30;
-let recibioAlgunaMedicion = false;  // se activa con el PRIMER evento vivo
-let ultimaActualizacionMs = null;   // Date.now() del último evento vivo
-let idIntervaloVigilante = null;
-let alertaMostrada = false;
-
-let timerStale = null;
-
-function parseFechaHoraMs(fecha, hora) {
-  if (!isValidStr(fecha) || !isValidStr(hora)) return null;
-
-  const f = String(fecha).trim();
-  const h = String(hora).trim();
-
-  // Acepta "YY-MM-DD" o "YYYY-MM-DD" (o con '/')
-  const fm = f.split(/[-/]/);
-  if (fm.length !== 3) return null;
-  let [y, m, d] = fm.map(n => parseInt(n, 10));
-  if (isNaN(y) || isNaN(m) || isNaN(d)) return null;
-  if (y < 100) y += 2000; // 25 -> 2025
-
-  const hm = h.split(':');
-  if (hm.length < 2) return null;
-  const hh = parseInt(hm[0], 10);
-  const mm = parseInt(hm[1], 10);
-  if (isNaN(hh) || isNaN(mm)) return null;
-
-  const dt = new Date(y, m - 1, d, hh, mm, 0, 0); // hora local
-  return dt.getTime();
-}
-
-function programarAlarma(msFromData) {
-  // msFromData = timestamp (ms) de la última medición (fecha+hora parseadas)
-  const now = Date.now();
-  const base = (typeof msFromData === 'number') ? Math.min(msFromData, now) : now;
-  const transcurrido = now - base;
-  const umbralMs = UMBRAL_MINUTOS_SIN_ACT * 60000;
-  const restante = umbralMs - transcurrido;
-
-  // Limpia cualquier alarma previa
-  if (timerStale) clearTimeout(timerStale);
-
-  // Si ya venció al cargar, alerta de inmediato
-  if (restante <= 0) {
-    const mins = Math.floor(transcurrido / 60000);
-    mostrarAlertaInactividad(mins);
-    return;
-  }
-
-  // Programa disparo exacto
-  timerStale = setTimeout(() => {
-    const mins = Math.floor((Date.now() - base) / 60000);
-    mostrarAlertaInactividad(mins);
-  }, Math.max(restante, 1000));
-}
-
-function iniciarVigilante() {
-  if (idIntervaloVigilante) return;
-  idIntervaloVigilante = setInterval(() => {
-    if (!recibioAlgunaMedicion || !ultimaActualizacionMs) return;
-    const mins = (Date.now() - ultimaActualizacionMs) / 60000;
-    if (mins >= UMBRAL_MINUTOS_SIN_ACT) {
-      mostrarAlertaInactividad(Math.floor(mins));
-    }
-  }, 60 * 1000); // revisa cada minuto
-}
-
-function mostrarAlertaInactividad(mins) {
-  if (alertaMostrada) return;
-  alertaMostrada = true;
-
-  let banner = document.getElementById('stale-alert');
-  if (!banner) {
-    banner = document.createElement('div');
-    banner.id = 'stale-alert';
-    banner.style.cssText = [
-      'position:fixed','left:0','right:0','bottom:0','z-index:9999',
-      'padding:12px 16px','background:#ffd1d1','color:#8b0000',
-      'border-top:2px solid #8b0000','font-weight:600','text-align:center'
-    ].join(';');
-
-    const span = document.createElement('span');
-    span.id = 'stale-alert-text';
-    span.textContent = `Sin actualizaciones en los últimos ${UMBRAL_MINUTOS_SIN_ACT} minutos.`;
-    banner.appendChild(span);
-
-    const btn = document.createElement('button');
-    btn.textContent = 'Cerrar';
-    btn.style.cssText = 'margin-left:12px;padding:4px 8px;font-weight:600';
-    btn.onclick = () => { alertaMostrada = false; banner.remove(); };
-    banner.appendChild(btn);
-
-    document.body.appendChild(banner);
-  } else {
-    const span = document.getElementById('stale-alert-text');
-    if (span) span.textContent = `Sin actualizaciones en los últimos ${UMBRAL_MINUTOS_SIN_ACT} minutos (≈${mins} min).`;
-  }
-
-  // Llamada de atención: una vez
-  try { alert(`Aviso: No se han recibido actualizaciones en ${UMBRAL_MINUTOS_SIN_ACT} minutos.`); } catch (e) {}
-}
-
-function limpiarAlertaInactividad() {
-  alertaMostrada = false;
-  const banner = document.getElementById('stale-alert');
-  if (banner) banner.remove();
-}
-
-function marcaActualizacionReciente(msFromData) {
-  recibioAlgunaMedicion = true;
-  ultimaActualizacionMs = (typeof msFromData === 'number') ? Math.min(msFromData, Date.now()) : Date.now();
-  limpiarAlertaInactividad();
-  iniciarVigilante();          // puedes dejarlo como “respaldo” si quieres
-  programarAlarma(msFromData); // <- disparo exacto al llegar al umbral
-}
 
 // ---- Utilidades UI
 function prepararTablaVacia() {
@@ -193,10 +85,9 @@ function updateTimeInfoUI() {
     '<strong>Hora Última Medición:</strong> ' + (ultimaHoraGlobal ?? '');
 }
 
-// ===== NUEVO: helpers para controlar el pintado de estáticos =====
+// ===== Helpers para controlar el pintado de estáticos =====
 function hasAnyStatic() {
-  return [ESPIDGlobal, horaInicioGlobal, ubicacionGlobal, fechaInicioGlobal]
-    .some(isValidStr);
+  return [ESPIDGlobal, horaInicioGlobal, ubicacionGlobal, fechaInicioGlobal].some(isValidStr);
 }
 
 function clearStaticInfoUI() {
@@ -256,7 +147,7 @@ function listenStaticFields() {
       if (fechaInicioGlobal == null && isValidStr(entry.fecha)) fechaInicioGlobal = entry.fecha;
       updateStaticInfoUI();         // <- pinta porque sí hay datos
     } else {
-      clearStaticInfoUI();          // <- AHORA: sin datos, deja vacío
+      clearStaticInfoUI();          // <- sin datos, deja vacío
     }
   });
 
@@ -321,7 +212,8 @@ const historialRootRef = database.ref('/historial_mediciones');
 
 historialRootRef.limitToLast(1).on('child_added', snap => {
   const data = snap.val() || {};
-  const msData = parseFechaHoraMs(data.fecha, data.hora);
+
+  // Actualiza UI última fecha/hora
   if (isValidStr(data.hora)) {
     ultimaHoraGlobal = data.hora;
     updateTimeInfoUI();
@@ -330,15 +222,20 @@ historialRootRef.limitToLast(1).on('child_added', snap => {
     ultimaFechaGlobal = data.fecha;
     updateTimeInfoUI();
   }
+
   renderUltimaMedicion(data);
 
-  // Marca que llegó un evento vivo y arranca/reinicia el conteo de 30 min
-  marcaActualizacionReciente(msData);
+  // Marca actualización para la alerta global (stale-alert.js)
+  if (typeof window.staleMsFromFechaHora === "function" && typeof window.staleMarkUpdate === "function") {
+    const msData = window.staleMsFromFechaHora(data.fecha, data.hora);
+    window.staleMarkUpdate(msData);
+  }
 });
 
 historialRootRef.limitToLast(1).on('child_changed', snap => {
   const data = snap.val() || {};
-  const msData = parseFechaHoraMs(data.fecha, data.hora);
+
+  // Actualiza UI última fecha/hora
   if (isValidStr(data.hora)) {
     ultimaHoraGlobal = data.hora;
     updateTimeInfoUI();
@@ -347,10 +244,14 @@ historialRootRef.limitToLast(1).on('child_changed', snap => {
     ultimaFechaGlobal = data.fecha;
     updateTimeInfoUI();
   }
+
   renderUltimaMedicion(data);
 
-  // Marca que llegó un evento vivo y arranca/reinicia el conteo de 30 min
-  marcaActualizacionReciente(msData);
+  // Marca actualización para la alerta global (stale-alert.js)
+  if (typeof window.staleMsFromFechaHora === "function" && typeof window.staleMarkUpdate === "function") {
+    const msData = window.staleMsFromFechaHora(data.fecha, data.hora);
+    window.staleMarkUpdate(msData);
+  }
 });
 
 // ---- CSV (igual que lo tenías, respeta los globales)

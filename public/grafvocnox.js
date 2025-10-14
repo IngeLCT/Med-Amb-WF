@@ -72,7 +72,9 @@ window.addEventListener('load', () => {
     const [dd,mm,yyyy] = fecha.split('-');
     return `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
   }
+
   function addDays(isoDate, days){ const d=new Date(isoDate+'T00:00:00'); d.setDate(d.getDate()+days); const yyyy=d.getFullYear(); const mm=String(d.getMonth()+1).padStart(2,'0'); const dd=String(d.getDate()).padStart(2,'0'); return `${yyyy}-${mm}-${dd}`; }
+  
   function inferDatesForEntries(entries){
     const n = entries.length; const dates = new Array(n).fill(null); const markers=[];
     for(let i=n-1;i>=0;i--){ const v=entries[i][1]; if(v && v.fecha){ markers.push(i);} }
@@ -85,6 +87,7 @@ window.addEventListener('load', () => {
     }
     return dates;
   }
+
   function makeTimestampWithDate(isoDate, v){ const h = v.hora || v.tiempo || '00:00:00'; return `${isoDate} ${h}`; }
 
     function Series(divId){
@@ -95,13 +98,15 @@ window.addEventListener('load', () => {
       this.keys= new Array(MAX_POINTS).fill(null);
       this.count = 0; // <<-- NUEVO: cuántos puntos válidos hay ya pintados (0..MAX_POINTS)
   }
+
     function updateYAxisRange(divId, yValues){
     const finite = (yValues||[]).filter(v => Number.isFinite(v) && v >= 0);
     const maxVal = finite.length ? Math.max(...finite) : 0;
     const upper = (maxVal > 0) ? (maxVal * 2) : 1;
     Plotly.relayout(divId, { 'yaxis.autorange': false, 'yaxis.range': [0, upper] });
   }
-        function updateXAxisTicks(divId, xVals, labels){
+  
+  function updateXAxisTicks(divId, xVals, labels){
     const tickvals = Array.isArray(xVals) ? xVals : [];
     const vals = Array.isArray(labels) ? labels : [];
     const ticktext = [];
@@ -184,7 +189,19 @@ window.addEventListener('load', () => {
     if(v && v.fecha){ lastMarkerDateISO = toIsoDate(v.fecha); }
     const dateISO = (v && v.fecha) ? toIsoDate(v.fecha) : (lastMarkerDateISO || toIsoDate());
     const label=makeTimestampWithDate(dateISO, v||{});
-    sVOC.add(k,label,Math.round(v?.voc??0)); sNOx.add(k,label,Math.round(v?.nox??0)); 
+    sVOC.add(k,label,Math.round(v?.voc??0)); 
+    sNOx.add(k,label,Math.round(v?.nox??0)); 
+
+    const msData = staleMsFromISOAndRecord(dateISO, v || {});
+    staleMarkUpdate(msData);
   });
-  db.ref('/historial_mediciones').limitToLast(1).on('child_changed', snap=>{ const k=snap.key,v=snap.val(); sVOC.update(k,Math.round(v.voc??0)); sNOx.update(k,Math.round(v.nox??0)); });
+  db.ref('/historial_mediciones').limitToLast(1).on('child_changed', snap=>{ 
+    const k=snap.key,v=snap.val(); 
+    sVOC.update(k,Math.round(v.voc??0)); 
+    sNOx.update(k,Math.round(v.nox??0)); 
+
+    const dateISO = (v && v.fecha) ? toIsoDate(v.fecha) : (lastMarkerDateISO || toIsoDate());
+    const msData = staleMsFromISOAndRecord(dateISO, v || {});
+    staleMarkUpdate(msData);
+  });
 });

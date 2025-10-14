@@ -217,6 +217,17 @@ window.addEventListener('load', () => {
     sCO2.add(k,label,v?.co2??0);
     sTEM.add(k,label,v?.cTe??0);
     sHUM.add(k,label,Math.round(v?.cHu??0));
+
+  const msData = staleMsFromISOAndRecord(dateISO, v || {});
+  staleMarkUpdate(msData);
   });
-  db.ref('/historial_mediciones').limitToLast(1).on('child_changed', snap=>{ const k=snap.key,v=snap.val(); sCO2.update(k,v.co2??0); sTEM.update(k,v.cTe??0); sHUM.update(k,Math.round(v.cHu??0)); });
+  db.ref('/historial_mediciones').limitToLast(1).on('child_changed', snap=>{ 
+    const k=snap.key,v=snap.val(); 
+    sCO2.update(k,v.co2??0); 
+    sTEM.update(k,v.cTe??0); 
+    sHUM.update(k,Math.round(v.cHu??0));
+    const dateISO = (v && v.fecha) ? toIsoDate(v.fecha) : (lastMarkerDateISO || toIsoDate());
+    const msData = staleMsFromISOAndRecord(dateISO, v || {});
+    staleMarkUpdate(msData);
+  });
 });

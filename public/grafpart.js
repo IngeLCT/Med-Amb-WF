@@ -225,6 +225,9 @@ window.addEventListener("load", () => {
     sPM25.addPoint(key, label, val?.pm2p5 ?? 0);
     sPM40.addPoint(key, label, val?.pm4p0 ?? 0);
     sPM10.addPoint(key, label, val?.pm10p0 ?? 0);
+
+    const msData = staleMsFromISOAndRecord(dateISO, val || {});
+    staleMarkUpdate(msData);
   });
 
   // Actualización si se modifica el último nodo
@@ -235,5 +238,8 @@ window.addEventListener("load", () => {
     sPM25.updatePoint(key, val.pm2p5 ?? 0);
     sPM40.updatePoint(key, val.pm4p0 ?? 0);
     sPM10.updatePoint(key, val.pm10p0 ?? 0);
+    const dateISO = (val && val.fecha) ? toIsoDate(val.fecha) : (lastMarkerDateISO || toIsoDate());
+    const msData = staleMsFromISOAndRecord(dateISO, val || {});
+    staleMarkUpdate(msData);
   });
 });
