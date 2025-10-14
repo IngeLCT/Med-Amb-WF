@@ -31,6 +31,29 @@ let alertaMostrada = false;
 
 let timerStale = null;
 
+function parseFechaHoraMs(fecha, hora) {
+  if (!isValidStr(fecha) || !isValidStr(hora)) return null;
+
+  const f = String(fecha).trim();
+  const h = String(hora).trim();
+
+  // Acepta "YY-MM-DD" o "YYYY-MM-DD" (o con '/')
+  const fm = f.split(/[-/]/);
+  if (fm.length !== 3) return null;
+  let [y, m, d] = fm.map(n => parseInt(n, 10));
+  if (isNaN(y) || isNaN(m) || isNaN(d)) return null;
+  if (y < 100) y += 2000; // 25 -> 2025
+
+  const hm = h.split(':');
+  if (hm.length < 2) return null;
+  const hh = parseInt(hm[0], 10);
+  const mm = parseInt(hm[1], 10);
+  if (isNaN(hh) || isNaN(mm)) return null;
+
+  const dt = new Date(y, m - 1, d, hh, mm, 0, 0); // hora local
+  return dt.getTime();
+}
+
 function programarAlarma(msFromData) {
   // msFromData = timestamp (ms) de la última medición (fecha+hora parseadas)
   const now = Date.now();
@@ -99,7 +122,7 @@ function mostrarAlertaInactividad(mins) {
   }
 
   // Llamada de atención: una vez
-  try { alert('Aviso: No se han recibido actualizaciones en 30 minutos.'); } catch (e) {}
+  try { alert(`Aviso: No se han recibido actualizaciones en ${UMBRAL_MINUTOS_SIN_ACT} minutos.`); } catch (e) {}
 }
 
 function limpiarAlertaInactividad() {
