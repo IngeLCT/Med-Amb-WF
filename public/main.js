@@ -66,10 +66,12 @@ function updateTimeInfoUI() {
 }
 
 function hasAnyStatic(){ return [ESPIDGlobal,horaInicioGlobal,ubicacionGlobal,fechaInicioGlobal].some(isValidStr); }
+
 function clearStaticInfoUI(){
   const staticP=document.getElementById('T-I-Static'); const idEl=document.getElementById('ID');
   if (staticP) staticP.innerHTML=''; if (idEl) idEl.innerHTML='';
 }
+
 function updateStaticInfoUI(){
   if (!hasAnyStatic()){ clearStaticInfoUI(); return; }
   const staticP=document.getElementById('T-I-Static'); const idEl=document.getElementById('ID');
@@ -154,8 +156,14 @@ function primeStaleFromLastOnce(){
       updateTimeInfoUI();
       renderUltimaMedicion(last);
       if (typeof window.staleMsFromFechaHora === "function" && typeof window.staleMarkUpdate === "function") {
-        const msData = window.staleMsFromFechaHora(last.fecha, last.hora);
-        console.log("[stale] prime once ->", last.fecha, last.hora, msData);
+        const fechaEfectiva =
+          (last && last.fecha) ??
+          ultimaFechaGlobal ??
+          fechaInicioGlobal ??
+          new Date().toISOString().slice(0,10); // YYYY-MM-DD (fallback extremo)
+
+        const msData = window.staleMsFromFechaHora(fechaEfectiva, last && last.hora);
+        console.log("[stale] prime once ->", fechaEfectiva, last && last.hora, msData);
         window.staleMarkUpdate(msData);
       }
     }
@@ -173,8 +181,14 @@ historialRootRef.limitToLast(1).on('child_added', snap => {
   renderUltimaMedicion(data);
 
   if (typeof window.staleMsFromFechaHora === "function" && typeof window.staleMarkUpdate === "function") {
-    const msData = window.staleMsFromFechaHora(data.fecha, data.hora);
-    console.log("[stale] child_added ->", data.fecha, data.hora, msData);
+    const fechaEfectiva =
+      (data && data.fecha) ??
+      ultimaFechaGlobal ??
+      fechaInicioGlobal ??
+      new Date().toISOString().slice(0,10);
+
+    const msData = window.staleMsFromFechaHora(fechaEfectiva, data && data.hora);
+    console.log("[stale] child_added ->", fechaEfectiva, data && data.hora, msData);
     window.staleMarkUpdate(msData);
   }
 });
@@ -186,8 +200,14 @@ historialRootRef.limitToLast(1).on('child_changed', snap => {
   renderUltimaMedicion(data);
 
   if (typeof window.staleMsFromFechaHora === "function" && typeof window.staleMarkUpdate === "function") {
-    const msData = window.staleMsFromFechaHora(data.fecha, data.hora);
-    console.log("[stale] child_changed ->", data.fecha, data.hora, msData);
+    const fechaEfectiva =
+      (data && data.fecha) ??
+      ultimaFechaGlobal ??
+      fechaInicioGlobal ??
+      new Date().toISOString().slice(0,10);
+
+    const msData = window.staleMsFromFechaHora(fechaEfectiva, data && data.hora);
+    console.log("[stale] child_changed ->", fechaEfectiva, data && data.hora, msData);
     window.staleMarkUpdate(msData);
   }
 });
