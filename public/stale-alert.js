@@ -43,7 +43,7 @@
       banner.style.cssText = [
         'position:fixed','left:0','right:0','bottom:0','z-index:2147483647',
         'padding:12px 16px','background:#ffd1d1','color:#8b0000',
-        'border-top:2px solid #8b0000','font-weight:600','text-align:center', 'font-size: 30px'
+        'border-top:2px solid #8b0000','font-weight:600','text-align:center','font-size: 150%;'
       ].join(';');
 
       const span = document.createElement('span');
