@@ -3,6 +3,7 @@
   let thresholdMin = 15;      // valor por defecto; puedes sobreescribir en cada página con staleInit({thresholdMinutes: N})
   let alertShown = false;
   let timer = null;
+  let lastBaseMs = null; // <- NUEVO: último “baseline” programado
 
   function msFromFechaHora(fecha, hora) {
     if (!fecha || !hora) return null;
@@ -99,8 +100,16 @@
   }
 
   function staleMarkUpdate(msFromData) {
-    clearAlert();
-    scheduleAlarm(msFromData);
+    const now = Date.now();
+    const base = Math.min(msFromData || now, now);
+    const isFresher = (lastBaseMs == null) || (msFromData != null && base > lastBaseMs);
+
+    // Solo limpiamos si es un dato más reciente; si es igual/antiguo, no reiniciamos la alerta.
+    if (isFresher) {
+      clearAlert();
+      lastBaseMs = base;
+    }
+    scheduleAlarm(base);
   }
 
   function staleForceAlert() {
