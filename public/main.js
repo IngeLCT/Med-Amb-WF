@@ -16,7 +16,7 @@ const database = firebase.database();
 // Inicializa la librería de alerta (definida en stale-alert.js)
 if (typeof window.staleInit === "function") {
   // Ajusta el umbral aquí (minutos)
-  window.staleInit({ thresholdMinutes: 10 });
+  window.staleInit({ thresholdMinutes: 15 });
 } else {
   console.warn("stale-alert.js no está cargado; no habrá alerta por inactividad.");
 }
