@@ -1,6 +1,6 @@
 // stale-alert.js — librería común de alerta por inactividad
 (() => {
-  let thresholdMin = 30;      // valor por defecto; puedes sobreescribir en cada página con staleInit({thresholdMinutes: N})
+  let thresholdMin = 15;      // valor por defecto; puedes sobreescribir en cada página con staleInit({thresholdMinutes: N})
   let alertShown = false;
   let timer = null;
 
