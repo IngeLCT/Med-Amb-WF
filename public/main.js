@@ -1,4 +1,4 @@
-// main.js — Limpio y usando stale-alert.js para la alerta de inactividad
+// main.js 
 
 const firebaseConfig = {
   apiKey: "AIzaSyAowEsndAOgwtEIfBABbq_GKNTX3bHh_VM",
@@ -13,10 +13,9 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
-// Inicializa la librería de alerta (definida en stale-alert.js)
+// Inicializa la librería de alerta (no pasamos thresholdMinutes, usa el del propio stale-alert.js)
 if (typeof window.staleInit === "function") {
-  // Ajusta el umbral aquí (minutos)
-  window.staleInit({ thresholdMinutes: 15 });
+  window.staleInit(); // ← usa el umbral definido dentro de stale-alert.js
 } else {
   console.warn("stale-alert.js no está cargado; no habrá alerta por inactividad.");
 }
