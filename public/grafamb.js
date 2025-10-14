@@ -1,309 +1,249 @@
-// grafamb.js — CO2, Temperatura, Humedad con AGRUPACIÓN por serie y 24 barras
-(function(){
+// grafamb.js — CO2, Temperatura, Humedad con rangeselector Plotly y agregación por serie
+(function () {
   'use strict';
 
-  // ====== Parámetros generales ======
   const MAX_BARS = 24;
-  const INITIAL_FETCH_LIMIT = 5000; // trae suficientes muestras para poder agregar (hasta 6h*24)
+  const INITIAL_FETCH_LIMIT = 5000;
   const db = firebase.database();
 
-  // Colores originales
-  const COLORS = {
-    CO2: '#990000',   // rojo
-    TEM: '#006600',   // verde
-    HUM: '#0000cc'    // azul
-  };
+  // Colores originales por serie
+  const COLORS = { CO2: '#990000', TEM: '#006600', HUM: '#0000cc' };
 
-  // ====== Helpers de fecha/hora ======
-  function toIsoDate(fecha){
-    if (!fecha || typeof fecha !== 'string'){
-      const d=new Date();
-      const mm=String(d.getMonth()+1).padStart(2,'0');
-      const dd=String(d.getDate()).padStart(2,'0');
+  // ---- Helpers fecha/hora -> timestamp ----
+  function toIsoDate(fecha) {
+    if (!fecha || typeof fecha !== 'string') {
+      const d = new Date();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
       return `${d.getFullYear()}-${mm}-${dd}`;
     }
     const parts = fecha.split(/[-/]/);
-    if (parts.length !== 3) return new Date().toISOString().slice(0,10);
-    // detecta formato DD-MM-YYYY o YYYY-MM-DD
+    if (parts.length !== 3) return new Date().toISOString().slice(0, 10);
     if (parts[0].length === 4) {
       const [yyyy, mm, dd] = parts;
-      return `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+      return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
     } else {
       const [dd, mm, yyyy] = parts;
-      return `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+      return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
     }
   }
-  function parseTsFrom(isoDate, v){
+  function parseTsFrom(isoDate, v) {
     const raw = (v && (v.hora || v.tiempo)) ? (v.hora || v.tiempo) : '00:00';
     const hhmmss = /^\d{1,2}:\d{2}$/.test(raw) ? `${raw}:00` : raw;
     const ms = Date.parse(`${isoDate}T${hhmmss}`);
     return Number.isFinite(ms) ? ms : null;
   }
-  function floorToBin(ts, minutes){
+  function floorToBin(ts, minutes) {
     const size = minutes * 60000;
     return ts - (ts % size);
   }
-  function buildBins(endTs, minutes, count=MAX_BARS){
-    const lastEnd = floorToBin(endTs, minutes) + minutes*60000; // [start,end)
+  function buildBins(endTs, minutes, count = MAX_BARS) {
+    const lastEnd = floorToBin(endTs, minutes) + minutes * 60000; // [start,end)
     const out = [];
-    for (let i=count-1; i>=0; i--){
-      const end = lastEnd - (count-1-i)*minutes*60000;
-      const start = end - minutes*60000;
+    for (let i = count - 1; i >= 0; i--) {
+      const end = lastEnd - (count - 1 - i) * minutes * 60000;
+      const start = end - minutes * 60000;
       out.push({ start, end });
     }
     return out;
   }
-  function avg(list){
+  function avg(list) {
     const v = list.filter(n => Number.isFinite(n));
     if (!v.length) return null;
-    return v.reduce((a,b)=>a+b,0)/v.length;
-  }
-  function labelFromMs(startMs){
-    const d=new Date(startMs);
-    const yyyy=d.getFullYear(), mm=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
-    const hh=String(d.getHours()).padStart(2,'0'), mi=String(d.getMinutes()).padStart(2,'0');
-    return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+    return v.reduce((a, b) => a + b, 0) / v.length;
   }
 
-  // ====== Eje y formato de ticks ======
-  function updateYAxisRange(divId, yValues){
-    const finite = (yValues||[]).filter(v=>Number.isFinite(v) && v>=0);
-    const maxVal = finite.length ? Math.max(...finite) : 0;
-    const upper  = (maxVal>0) ? (maxVal*2) : 1;
-    Plotly.relayout(divId, { 'yaxis.autorange': false, 'yaxis.range': [0, upper] });
-  }
-  function updateXAxisTicks(divId, labels){
-    const tickvals = labels.map((_,i)=>i);
-    const ticktext = [];
-    let prevDate = null;
-    let seen = false;
-    for(let i=0; i<labels.length; i++){
-      const s = String(labels[i] ?? '');
-      const m = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2}(?::\d{2})?)/);
-      let datePart='', timePart='';
-      if(m){ datePart=m[1]; timePart=m[2]; }
-      else {
-        const parts=s.split(/\s+/);
-        datePart = parts[0] || '';
-        timePart = parts[1] || parts[0] || '';
-      }
-      const hhmm = (timePart || '').split(':').slice(0,2).join(':') || s;
-      const isFirstNonEmpty = (!seen && !!datePart);
-      const dateChanged = datePart && prevDate && (datePart !== prevDate);
-      const showDate = isFirstNonEmpty || dateChanged;
-      const dispDate = datePart ? datePart.split('-').slice(0,3).reverse().join('-') : '';
-      ticktext.push(showDate && datePart ? `${hhmm}<br>${dispDate}` : hhmm);
-      if(datePart){ if(!seen) seen = true; prevDate = datePart; }
-    }
-    Plotly.relayout(divId, { 'xaxis.tickmode':'array', 'xaxis.tickvals':tickvals, 'xaxis.ticktext':ticktext });
-  }
-
-  // ====== Crear gráfico vacío ======
-  function makeChart(divId, title, color, yTitle){
-    const labels = new Array(MAX_BARS).fill('');
-    const values = new Array(MAX_BARS).fill(null);
-    Plotly.newPlot(divId, [{
-      x: labels.map((_,i)=>i),
-      y: values,
-      type:'bar',
-      name: title,
-      marker: { color }
-    }], {
-      title: { text:title, font:{size:20,color:'black',family:'Arial',weight:'bold'} },
-      xaxis: {
-        title: { text:'Fecha y Hora de Medición', font:{size:16,color:'black',family:'Arial',weight:'bold'}, standoff:30 },
-        type:'category',
-        tickfont:{color:'black',size:14,family:'Arial',weight:'bold'},
-        gridcolor:'black',
-        linecolor:'black',
-        autorange:true,
-        tickangle:-45
-      },
-      yaxis: {
-        title: { text:yTitle, font:{size:16,color:'black',family:'Arial',weight:'bold'} },
-        tickfont:{color:'black',size:14,family:'Arial',weight:'bold'},
-        gridcolor:'black',
-        linecolor:'black',
-        autorange:true,
-        fixedrange:false,
-        rangemode:'tozero'
-      },
-      plot_bgcolor:'#cce5dc',
-      paper_bgcolor:'#cce5dc',
-      margin:{t:50,l:60,r:40,b:110},
-      bargap:0.2
-    }, { responsive:true, useResizeHandler:true });
-    return { labels, values };
-  }
-  function setChart(divId, title, color, yTitle, labels, values){
-    const xIdx = labels.map((_,i)=>i);
-    Plotly.react(divId, [{
-      x: xIdx, y: values, type:'bar', name:title, marker:{ color }
-    }], {
-      title: { text:title, font:{size:20,color:'black',family:'Arial',weight:'bold'} },
-      xaxis: {
-        title: { text:'Fecha y Hora de Medición', font:{size:16,color:'black',family:'Arial',weight:'bold'}, standoff:30 },
-        type:'category',
-        tickfont:{color:'black',size:14,family:'Arial',weight:'bold'},
-        gridcolor:'black',
-        linecolor:'black',
-        autorange:true,
-        tickangle:-45
-      },
-      yaxis: {
-        title: { text:yTitle, font:{size:16,color:'black',family:'Arial',weight:'bold'} },
-        tickfont:{color:'black',size:14,family:'Arial',weight:'bold'},
-        gridcolor:'black',
-        linecolor:'black',
-        autorange:true,
-        fixedrange:false,
-        rangemode:'tozero'
-      },
-      plot_bgcolor:'#cce5dc',
-      paper_bgcolor:'#cce5dc',
-      margin:{t:50,l:60,r:40,b:110},
-      bargap:0.2
-    }, { responsive:true, useResizeHandler:true });
-    updateXAxisTicks(divId, labels);
-    updateYAxisRange(divId, values);
-  }
-
-  // ====== Select de agregación por serie ======
-  const AGG_CHOICES = [
-    { val: 5,   label: '5 min' },
-    { val: 15,  label: '15 min' },
-    { val: 30,  label: '30 min' },
-    { val: 60,  label: '1 hora' },
-    { val: 360, label: '6 horas' }
+  // ---- UI de Plotly: rangeselector (sin slider) ----
+  const RANGE_BUTTONS = [
+    { count: 5, step: 'minute', stepmode: 'backward', label: '5m' },
+    { count: 15, step: 'minute', stepmode: 'backward', label: '15m' },
+    { count: 30, step: 'minute', stepmode: 'backward', label: '30m' },
+    { count: 1, step: 'hour', stepmode: 'backward', label: '1h' },
+    { count: 6, step: 'hour', stepmode: 'backward', label: '6h' }
   ];
-  function injectAggSelect(divId, initialVal, onChange){
-    const chart = document.getElementById(divId);
-    const wrap = document.createElement('div');
-    wrap.style.cssText = 'display:flex;gap:8px;align-items:center;justify-content:flex-end;margin:6px 0;';
-    wrap.innerHTML = `<label style="font-weight:700">Agrupar:</label>
-      <select style="padding:4px 8px;border-radius:8px" data-for="${divId}">
-        ${AGG_CHOICES.map(o=>`<option value="${o.val}">${o.label}</option>`).join('')}
-      </select>`;
-    chart.parentElement.insertBefore(wrap, chart); // arriba del chart
-    const sel = wrap.querySelector('select');
-    sel.value = String(initialVal);
-    sel.addEventListener('change', e => onChange(parseInt(e.target.value,10)||5));
+  const CHOICES_MIN = [5, 15, 30, 60, 360];
+
+  function inferAggFromRelayout(relayoutData) {
+    const a = relayoutData['xaxis.range[0]'];
+    const b = relayoutData['xaxis.range[1]'];
+    if (!a || !b) return null;
+    const minutes = Math.round((new Date(b) - new Date(a)) / 60000);
+    // mapea al más cercano de nuestros choices (tolerancia 25%)
+    let pick = null, best = Infinity;
+    for (const c of CHOICES_MIN) {
+      const d = Math.abs(minutes - c);
+      if (d < best) { best = d; pick = c; }
+    }
+    if (pick && Math.abs(minutes - pick) <= Math.ceil(pick * 0.25)) return pick;
+    return null;
   }
 
-  // ====== Estado global de datos crudos ======
-  // Guardamos todas las muestras con timestamp
-  // { key, ts, co2, cTe, cHu }
+  // ---- Estado global crudo ----
+  // Guardamos TODO crudo para poder agregar en cualquier tamaño.
+  // Estructura: { key, ts, co2, cTe, cHu }
   let raw = [];
   let lastMarkerDateISO = null;
 
-  // ====== Configuración de cada serie ======
+  // ---- Serie / Chart config ----
   const SERIES = {
-    CO2: { divId:'CO2', title:'CO2 ppm', color:COLORS.CO2, key:'co2', yTitle:'ppm', agg:5 },
-    TEM: { divId:'TEM', title:'Temperatura °C', color:COLORS.TEM, key:'cTe', yTitle:'°C', agg:5 },
-    HUM: { divId:'HUM', title:'Humedad Relativa %', color:COLORS.HUM, key:'cHu', yTitle:'%',  agg:5, round:true }
+    CO2: { divId: 'CO2', title: 'CO2 (ppm)', color: COLORS.CO2, key: 'co2', yTitle: 'ppm', agg: 5 },
+    TEM: { divId: 'TEM', title: 'Temperatura (°C)', color: COLORS.TEM, key: 'cTe', yTitle: '°C', agg: 5 },
+    HUM: { divId: 'HUM', title: 'Humedad relativa (%)', color: COLORS.HUM, key: 'cHu', yTitle: '%', agg: 5, round: true }
   };
 
-  // Crea charts vacíos y selects por serie
-  Object.values(SERIES).forEach(cfg=>{
-    makeChart(cfg.divId, cfg.title, cfg.color, cfg.yTitle);
-    injectAggSelect(cfg.divId, cfg.agg, (newAgg)=>{
-      cfg.agg = newAgg;
-      redrawSeries(cfg);
-    });
-  });
+  function makeChart(cfg) {
+    const divId = cfg.divId;
+    const x = Array(MAX_BARS).fill(new Date()); // fechas dummy
+    const y = Array(MAX_BARS).fill(null);
 
-  // ====== Render para una serie ======
-  function getLast24RawForKey(key){
-    // toma los últimos 24 registros crudos y devuelve labels/values
-    const last = raw.slice(-MAX_BARS);
-    const labels = last.map(r => labelFromMs(r.ts));
-    let values = last.map(r => Number(r[key]));
-    if (key === 'cHu') {
-      values = values.map(v => Number.isFinite(v) ? Math.round(v) : v);
-    }
-    return { labels, values };
+    Plotly.newPlot(divId, [{
+      x, y,
+      type: 'bar',
+      name: cfg.title,
+      marker: { color: cfg.color }
+    }], {
+      title: cfg.title,
+      xaxis: {
+        type: 'date',
+        rangeselector: { buttons: RANGE_BUTTONS },
+        rangeslider: { visible: false },
+        tickangle: -45,
+        automargin: true
+      },
+      yaxis: {
+        title: cfg.yTitle,
+        rangemode: 'tozero',
+        autorange: true,
+        fixedrange: false
+      },
+      margin: { t: 50, l: 60, r: 20, b: 110 },
+      bargap: 0.2,
+      paper_bgcolor: '#cce5dc',
+      plot_bgcolor: '#cce5dc',
+      showlegend: false
+    }, { responsive: true });
+
+    // Escuchar clicks del rangeselector de ESTA gráfica
+    const el = document.getElementById(divId);
+    el.on('plotly_relayout', (e) => {
+      const pick = inferAggFromRelayout(e || {});
+      if (pick) {
+        cfg.agg = pick;
+        redrawSeries(cfg);
+        // restaurar vista (autorange) para mostrar SIEMPRE las 24 barras recalculadas
+        Plotly.relayout(divId, { 'xaxis.autorange': true, 'xaxis.rangeslider.visible': false });
+      }
+    });
   }
-  function getAgg24ForKey(key, minutes){
-    if (!raw.length) return { labels: new Array(MAX_BARS).fill(''), values: new Array(MAX_BARS).fill(null) };
-    const lastTs = raw[raw.length-1].ts;
+
+  function setChartData(cfg, xDates, yVals) {
+    // Completar a 24
+    let x = xDates.slice(-MAX_BARS);
+    let y = yVals.slice(-MAX_BARS);
+    while (x.length < MAX_BARS) x.unshift(new Date(x.length ? x[0] : Date.now()));
+    while (y.length < MAX_BARS) y.unshift(null);
+
+    if (cfg.round) y = y.map(v => Number.isFinite(v) ? Math.round(v) : v);
+
+    Plotly.react(cfg.divId, [{
+      x, y, type: 'bar', name: cfg.title, marker: { color: cfg.color }
+    }], {
+      title: cfg.title,
+      xaxis: { type: 'date', rangeselector: { buttons: RANGE_BUTTONS }, rangeslider: { visible: false }, tickangle: -45, automargin: true },
+      yaxis: { title: cfg.yTitle, rangemode: 'tozero', autorange: true, fixedrange: false },
+      margin: { t: 50, l: 60, r: 20, b: 110 },
+      bargap: 0.2,
+      paper_bgcolor: '#cce5dc',
+      plot_bgcolor: '#cce5dc',
+      showlegend: false
+    }, { responsive: true });
+  }
+
+  // ---- Datos para 5 min (24 últimas crudas) ----
+  function getLast24RawForKey(key) {
+    const last = raw.slice(-MAX_BARS);
+    const xs = last.map(r => new Date(r.ts));
+    const ys = last.map(r => Number(r[key]));
+    return { xs, ys };
+  }
+
+  // ---- Datos agregados (24 bins del tamaño minutes) ----
+  function getAgg24ForKey(key, minutes) {
+    if (!raw.length) return { xs: Array(MAX_BARS).fill(new Date()), ys: Array(MAX_BARS).fill(null) };
+    const lastTs = raw[raw.length - 1].ts;
     const bins = buildBins(lastTs, minutes, MAX_BARS);
-    const labels = bins.map(b => labelFromMs(b.start));
-    let values = bins.map(b => {
-      const nums = raw.filter(r => r.ts>=b.start && r.ts<b.end).map(r => Number(r[key]));
+    const xs = bins.map(b => new Date(b.start)); // usamos el inicio del bin
+    const ys = bins.map(b => {
+      const nums = raw.filter(r => r.ts >= b.start && r.ts < b.end).map(r => Number(r[key]));
       return avg(nums);
     });
-    if (key === 'cHu'){
-      values = values.map(v => Number.isFinite(v) ? Math.round(v) : v);
-    }
-    return { labels, values };
-  }
-  function redrawSeries(cfg){
-    let data;
-    if (cfg.agg === 5) data = getLast24RawForKey(cfg.key);
-    else data = getAgg24ForKey(cfg.key, cfg.agg);
-    // Completa a 24
-    let labels = data.labels.slice(-MAX_BARS);
-    let values = data.values.slice(-MAX_BARS);
-    while (labels.length < MAX_BARS) labels.unshift('');
-    while (values.length < MAX_BARS) values.unshift(null);
-    setChart(cfg.divId, cfg.title, cfg.color, cfg.yTitle, labels, values);
+    return { xs, ys };
   }
 
-  // ====== Carga inicial amplia para agregación ======
+  function redrawSeries(cfg) {
+    const data = (cfg.agg === 5)
+      ? getLast24RawForKey(cfg.key)
+      : getAgg24ForKey(cfg.key, cfg.agg);
+    setChartData(cfg, data.xs, data.ys);
+  }
+
+  // ---- Crear gráficos + selectors por serie ----
+  Object.values(SERIES).forEach(makeChart);
+
+  // ---- Carga inicial amplia para poder agregar ----
   const base = db.ref('/historial_mediciones').orderByKey().limitToLast(INITIAL_FETCH_LIMIT);
-  base.once('value', snap=>{
+  base.once('value', snap => {
     const obj = snap.val();
     if (!obj) return;
-    const entries = Object.entries(obj).sort(([a],[b]) => (a<b?-1:a>b?1:0)); // viejo->nuevo
-    entries.forEach(([k,v])=>{
+    const entries = Object.entries(obj).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)); // viejo->nuevo
+    entries.forEach(([k, v]) => {
       if (v && v.fecha) lastMarkerDateISO = toIsoDate(v.fecha) || lastMarkerDateISO;
-      const dateISO = (v && v.fecha) ? toIsoDate(v.fecha) : (lastMarkerDateISO || new Date().toISOString().slice(0,10));
-      const ts = parseTsFrom(dateISO, v||{});
-      if (Number.isFinite(ts)){
+      const dateISO = (v && v.fecha) ? toIsoDate(v.fecha) : (lastMarkerDateISO || new Date().toISOString().slice(0, 10));
+      const ts = parseTsFrom(dateISO, v || {});
+      if (Number.isFinite(ts)) {
         raw.push({
-          key:k, ts,
+          key: k, ts,
           co2: v?.co2 ?? 0,
           cTe: v?.cTe ?? 0,
           cHu: v?.cHu ?? 0
         });
       }
     });
-    raw.sort((a,b)=>a.ts-b.ts);
-    // Render inicial según agg de cada serie (5 min -> últimos 24 crudos)
+    raw.sort((a, b) => a.ts - b.ts);
     Object.values(SERIES).forEach(redrawSeries);
   });
 
-  // ====== Suscripciones en vivo ======
+  // ---- Tiempo real ----
   const liveRef = db.ref('/historial_mediciones').limitToLast(1);
-  liveRef.on('child_added', snap=>{
+  liveRef.on('child_added', snap => {
     const k = snap.key, v = snap.val() || {};
     if (v && v.fecha) lastMarkerDateISO = toIsoDate(v.fecha) || lastMarkerDateISO;
-    const dateISO = (v && v.fecha) ? toIsoDate(v.fecha) : (lastMarkerDateISO || new Date().toISOString().slice(0,10));
+    const dateISO = (v && v.fecha) ? toIsoDate(v.fecha) : (lastMarkerDateISO || new Date().toISOString().slice(0, 10));
     const ts = parseTsFrom(dateISO, v);
-    if (Number.isFinite(ts)){
-      raw.push({ key:k, ts, co2:v?.co2??0, cTe:v?.cTe??0, cHu:v?.cHu??0 });
-      raw.sort((a,b)=>a.ts-b.ts);
+    if (Number.isFinite(ts)) {
+      raw.push({ key: k, ts, co2: v?.co2 ?? 0, cTe: v?.cTe ?? 0, cHu: v?.cHu ?? 0 });
+      raw.sort((a, b) => a.ts - b.ts);
       Object.values(SERIES).forEach(redrawSeries);
     }
-    if (window.staleMsFromFechaHora && window.staleMarkUpdate){
-      const msData = window.staleMsFromFechaHora(dateISO, v.hora||v.tiempo);
+    if (window.staleMsFromFechaHora && window.staleMarkUpdate) {
+      const msData = window.staleMsFromFechaHora(dateISO, v.hora || v.tiempo);
       window.staleMarkUpdate(msData);
     }
   });
-  liveRef.on('child_changed', snap=>{
+  liveRef.on('child_changed', snap => {
     const k = snap.key, v = snap.val() || {};
     if (v && v.fecha) lastMarkerDateISO = toIsoDate(v.fecha) || lastMarkerDateISO;
-    const dateISO = (v && v.fecha) ? toIsoDate(v.fecha) : (lastMarkerDateISO || new Date().toISOString().slice(0,10));
+    const dateISO = (v && v.fecha) ? toIsoDate(v.fecha) : (lastMarkerDateISO || new Date().toISOString().slice(0, 10));
     const ts = parseTsFrom(dateISO, v);
-    if (Number.isFinite(ts)){
+    if (Number.isFinite(ts)) {
       const idx = raw.findIndex(r => r.key === k);
-      const rec = { key:k, ts, co2:v?.co2??0, cTe:v?.cTe??0, cHu:v?.cHu??0 };
-      if (idx>=0) raw[idx] = rec; else raw.push(rec);
-      raw.sort((a,b)=>a.ts-b.ts);
+      const rec = { key: k, ts, co2: v?.co2 ?? 0, cTe: v?.cTe ?? 0, cHu: v?.cHu ?? 0 };
+      if (idx >= 0) raw[idx] = rec; else raw.push(rec);
+      raw.sort((a, b) => a.ts - b.ts);
       Object.values(SERIES).forEach(redrawSeries);
     }
-    if (window.staleMsFromFechaHora && window.staleMarkUpdate){
-      const msData = window.staleMsFromFechaHora(dateISO, v.hora||v.tiempo);
+    if (window.staleMsFromFechaHora && window.staleMarkUpdate) {
+      const msData = window.staleMsFromFechaHora(dateISO, v.hora || v.tiempo);
       window.staleMarkUpdate(msData);
     }
   });
