@@ -188,7 +188,7 @@ historialRootRef.limitToLast(1).on('child_added', snap => {
       new Date().toISOString().slice(0,10);
 
     const msData = window.staleMsFromFechaHora(fechaEfectiva, data && data.hora);
-    console.log("[stale] child_added ->", fechaEfectiva, data && data.hora, msData);
+    //console.log("[stale] child_added ->", fechaEfectiva, data && data.hora, msData);
     window.staleMarkUpdate(msData);
   }
 });
@@ -207,7 +207,7 @@ historialRootRef.limitToLast(1).on('child_changed', snap => {
       new Date().toISOString().slice(0,10);
 
     const msData = window.staleMsFromFechaHora(fechaEfectiva, data && data.hora);
-    console.log("[stale] child_changed ->", fechaEfectiva, data && data.hora, msData);
+    //console.log("[stale] child_changed ->", fechaEfectiva, data && data.hora, msData);
     window.staleMarkUpdate(msData);
   }
 });
