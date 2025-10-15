@@ -179,7 +179,7 @@
         gridcolor:'black',
         linecolor:'black',
         autorange: true,
-        title: { text: '<b>Fecha y Hora de Medición</b>', font: { size:16,color:'black',family:'Arial',weight:'bold'}, standoff: 36 }, // ← más espacio
+        title: { text: '<b>Fecha y Hora de Medición</b>', font: { size:16,color:'black',family:'Arial',weight:'bold'}, standoff: 30 }, // ← más espacio
         tickfont: { color:'black',size:14,family:'Arial',weight:'bold' }
       },
       yaxis: {
@@ -259,7 +259,7 @@
         gridcolor:'black',
         linecolor:'black',
         autorange: true,
-        title: { text:'<b>Fecha y Hora de Medición</b>', font:{ size:16,color:'black',family:'Arial',weight:'bold' }, standoff: 36 }, // ← más espacio
+        title: { text:'<b>Fecha y Hora de Medición</b>', font:{ size:16,color:'black',family:'Arial',weight:'bold' }, standoff: 30 }, // ← más espacio
         tickfont: { color:'black',size:14,family:'Arial',weight:'bold' }
       },
       yaxis: {
