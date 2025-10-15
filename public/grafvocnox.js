@@ -183,7 +183,7 @@
         gridcolor:'black',
         linecolor:'black',
         autorange: true,
-        title: { text: '<b>Fecha y Hora de Medición</b>', font: { size:16,color:'black',family:'Arial',weight:'bold'}, standoff: 30 },
+        title: { text: '<b>Fecha y Hora de Medición</b>', font: { size:16,color:'black',family:'Arial',weight:'bold'}, standoff: 36 },
         tickfont: { color:'black',size:14,family:'Arial',weight:'bold' }
       },
       yaxis: {
@@ -195,7 +195,7 @@
         autorange: true,
         fixedrange:false
       },
-      margin:{ t:20, l:60, r:40, b:110 },
+      margin:{ t:20, l:60, r:40, b:130 },
       bargap:0.2,
       paper_bgcolor:'#cce5dc',
       plot_bgcolor:'#cce5dc',
@@ -262,7 +262,7 @@
         gridcolor:'black',
         linecolor:'black',
         autorange: true,
-        title: { text:'<b>Fecha y Hora de Medición</b>', font:{ size:16,color:'black',family:'Arial',weight:'bold' }, standoff: 30 },
+        title: { text:'<b>Fecha y Hora de Medición</b>', font:{ size:16,color:'black',family:'Arial',weight:'bold' }, standoff: 36 },
         tickfont: { color:'black',size:14,family:'Arial',weight:'bold' }
       },
       yaxis: {
@@ -274,7 +274,7 @@
         autorange: true,
         fixedrange:false
       },
-      margin:{ t:20, l:60, r:40, b:110 },
+      margin:{ t:20, l:60, r:40, b:130 },
       bargap:0.2,
       paper_bgcolor:'#cce5dc',
       plot_bgcolor:'#cce5dc',
