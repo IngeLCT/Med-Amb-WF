@@ -19,7 +19,7 @@
         display:flex; flex-direction:column; gap:6px; margin:8px 0 4px 0; width:100%;
       }
       .agg-toolbar-label{
-        font-weight:700; font-size:14px; color:#000; text-align:left;
+        font-weight:700; font-size:16px; color:#000; text-align:left;
       }
       .agg-toolbar{
         display:flex; gap:6px; flex-wrap:wrap; align-items:center; justify-content:flex-start;
@@ -163,7 +163,7 @@
       name: cfg.title,
       marker:{ color: cfg.color }
     }], {
-      title: { text: cfg.title, font: { size: 20, color: '#000' } },
+      title: { text: cfg.title, font: { size: 18, color: '#000' } },
       xaxis: {
         type: 'category',
         tickmode:'array',
