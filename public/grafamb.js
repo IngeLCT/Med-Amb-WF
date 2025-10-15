@@ -1,51 +1,51 @@
-// grafamb.js — CO2, Temperatura, Humedad con selector visible (por gráfica), 24 barras y sin huecos
+// grafamb.js — CO2, Temperatura, Humedad con selector compacto, 24 barras, títulos y ejes formateados
 (function () {
   'use strict';
 
   const MAX_BARS = 24;
-  const INITIAL_FETCH_LIMIT = 5000;         // Trae suficiente histórico para agregar
+  const INITIAL_FETCH_LIMIT = 5000; // histórico suficiente para agregación
   const db = firebase.database();
 
-  // Colores originales por serie
+  // Colores originales
   const COLORS = { CO2: '#990000', TEM: '#006600', HUM: '#0000cc' };
 
-  // ===================== Estilos del selector (inyectados) =====================
+  // ===================== CSS del selector (compacto) =====================
   (function injectSelectorCSS(){
     if (document.getElementById('agg-toolbar-css')) return;
-      const style = document.createElement('style');
-      style.id = 'agg-toolbar-css';
-      style.textContent = `
-        .agg-toolbar-wrap{
-          display:flex; flex-direction:column; gap:6px; margin:10px 0 6px 0;
-        }
-        .agg-toolbar-label{
-          font-weight:700; font-size:16px; color:#000;
-        }
-        .agg-toolbar{
-          display:flex; gap:8px; flex-wrap:wrap; align-items:center;
-          --agg-btn-w: 110px; /* ← ancho uniforme de todos los botones (ajústalo si quieres) */
-        }
-        .agg-btn{
-          cursor:pointer; user-select:none;
-          padding:8px 14px; border-radius:10px;
-          background:#e9f4ef; border:2px solid #2a2a2a;
-          font-size:16px; font-weight:500; color:#000;     /* ← letra negra */
-          width: var(--agg-btn-w);                         /* ← mismo ancho para todos */
-          text-align:center;
-          transition: transform 0.12s ease, box-shadow 0.12s ease, font-size 0.12s ease;
-        }
-        .agg-btn:hover{ box-shadow:0 1px 0 rgba(0,0,0,.4); }
-        .agg-btn.active{
-          transform: scale(1.08);    /* ← agranda VISUALMENTE el seleccionado sin cambiar layout */
-          font-weight:800;
-          font-size:18px;
-          background:#d9efe7;
-        }
-      `;
-      document.head.appendChild(style);
+    const style = document.createElement('style');
+    style.id = 'agg-toolbar-css';
+    style.textContent = `
+      .agg-toolbar-wrap{
+        display:flex; flex-direction:column; gap:6px; margin:8px 0 4px 0; width:100%;
+      }
+      .agg-toolbar-label{
+        font-weight:700; font-size:14px; color:#000; text-align:left;
+      }
+      .agg-toolbar{
+        display:flex; gap:6px; flex-wrap:wrap; align-items:center; justify-content:flex-start;
+        --agg-btn-w: 96px; /* ancho uniforme de los botones */
+      }
+      .agg-btn{
+        cursor:pointer; user-select:none;
+        padding:6px 10px; border-radius:10px;
+        background:#e9f4ef; border:2px solid #2a2a2a;
+        font-size:14px; font-weight:600; color:#000;
+        width: var(--agg-btn-w);
+        text-align:center;
+        transition: transform 0.12s ease, box-shadow 0.12s ease, font-size 0.12s ease;
+      }
+      .agg-btn:hover{ box-shadow:0 1px 0 rgba(0,0,0,.35); }
+      .agg-btn.active{
+        transform: scale(1.06);  /* “crece” sin afectar layout */
+        font-weight:800;
+        font-size:15px;
+        background:#d9efe7;
+      }
+    `;
+    document.head.appendChild(style);
   })();
 
-  // ===================== Helpers de fechas/horas =====================
+  // ===================== Helpers de fecha/hora =====================
   function toIsoDate(fecha) {
     if (!fecha || typeof fecha !== 'string') {
       const d = new Date();
@@ -57,10 +57,10 @@
     if (parts.length !== 3) return new Date().toISOString().slice(0, 10);
     if (parts[0].length === 4) {
       const [yyyy, mm, dd] = parts;
-      return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+      return `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
     } else {
       const [dd, mm, yyyy] = parts;
-      return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+      return `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
     }
   }
   function parseTsFrom(isoDate, v) {
@@ -73,69 +73,60 @@
     const size = minutes * 60000;
     return ts - (ts % size);
   }
-  function avg(list) {
-    const v = list.filter(n => Number.isFinite(n));
+  function avg(arr) {
+    const v = arr.filter(n => Number.isFinite(n));
     if (!v.length) return null;
-    return v.reduce((a, b) => a + b, 0) / v.length;
+    return v.reduce((a,b)=>a+b,0)/v.length;
   }
   function labelFromMs(ms) {
-    const d = new Date(ms);
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mi = String(d.getMinutes()).padStart(2, '0');
+    const d=new Date(ms);
+    const yyyy=d.getFullYear(), mm=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+    const hh=String(d.getHours()).padStart(2,'0'), mi=String(d.getMinutes()).padStart(2,'0');
     return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
   }
-  // Etiquetas amigables en eje categórico
+  // Ticktext amigable para eje categórico (con fecha en saltos)
   function buildTickText(labels) {
-    const ticktext = [];
-    let prevDate = null;
-    let seen = false;
-    for (let i = 0; i < labels.length; i++) {
+    const t = []; let prevDate=null; let seen=false;
+    for (let i=0;i<labels.length;i++){
       const s = String(labels[i] ?? '');
       const m = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})/);
-      let datePart = '', timePart = '';
-      if (m) { datePart = m[1]; timePart = m[2]; }
+      let datePart='', timePart='';
+      if (m) { datePart=m[1]; timePart=m[2]; }
       const ddmmyyyy = datePart ? datePart.split('-').reverse().join('-') : '';
       const isFirst = (!seen && !!datePart);
       const changed = datePart && prevDate && (datePart !== prevDate);
       const showDate = isFirst || changed;
-      ticktext.push(showDate && datePart ? `${timePart}<br>${ddmmyyyy}` : (timePart || s));
-      if (datePart) { if (!seen) seen = true; prevDate = datePart; }
+      t.push(showDate && datePart ? `${timePart}<br>${ddmmyyyy}` : (timePart || s));
+      if (datePart) { if(!seen) seen=true; prevDate=datePart; }
     }
-    return ticktext;
+    return t;
   }
 
   // ===================== Estado crudo (todas las muestras) =====================
-  // Guardamos todo para poder re-agrupar libremente.
-  // r: { key, ts, co2, cTe, cHu }
-  let raw = [];
+  let raw = []; // { key, ts, co2, cTe, cHu }
   let lastMarkerDateISO = null;
 
   // ===================== Config por serie =====================
-  // agg = minutos seleccionados
   const SERIES = {
-    CO2: { divId: 'CO2', title: 'CO2 (ppm)', color: COLORS.CO2, key: 'co2', yTitle: 'ppm', agg: 5, round: false },
-    TEM: { divId: 'TEM', title: 'Temperatura (°C)', color: COLORS.TEM, key: 'cTe', yTitle: '°C',  agg: 5, round: false },
-    HUM: { divId: 'HUM', title: 'Humedad relativa (%)', color: COLORS.HUM, key: 'cHu', yTitle: '%',   agg: 5, round: true  }
+    CO2: { divId:'CO2', title:'CO2 (ppm)', color:COLORS.CO2, key:'co2', yTitle:'CO2 (ppm)', agg:5, round:false },
+    TEM: { divId:'TEM', title:'Temperatura (°C)', color:COLORS.TEM, key:'cTe', yTitle:'Temperatura (°C)', agg:5, round:false },
+    HUM: { divId:'HUM', title:'Humedad relativa (%)', color:COLORS.HUM, key:'cHu', yTitle:'Humedad relativa (%)', agg:5, round:true }
   };
 
-  // Opciones de intervalos (reemplazamos 6 hr por 2 hr y 4 hr)
   const MENU = [
-    { label: '5 min',  val: 5 },
-    { label: '15 min', val: 15 },
-    { label: '30 min', val: 30 },
-    { label: '1 hr',   val: 60 },
-    { label: '2 hr',   val: 120 },
-    { label: '4 hr',   val: 240 }
+    { label:'5 min',  val:5   },
+    { label:'15 min', val:15  },
+    { label:'30 min', val:30  },
+    { label:'1 hr',   val:60  },
+    { label:'2 hr',   val:120 },
+    { label:'4 hr',   val:240 }
   ];
 
-  // ===================== Crear chart vacío + toolbar por serie =====================
+  // ===================== Crear chart + toolbar por serie =====================
   function makeChart(cfg) {
     const divId = cfg.divId;
 
-    // Toolbar visual por encima del chart
+    // Toolbar (encima del chart)
     const chartEl = document.getElementById(divId);
     const wrap = document.createElement('div');
     wrap.className = 'agg-toolbar-wrap';
@@ -146,18 +137,16 @@
     chartEl.parentElement.insertBefore(wrap, chartEl);
 
     const toolbar = wrap.querySelector(`#tb-${divId}`);
-    MENU.forEach(opt => {
+    MENU.forEach(opt=>{
       const btn = document.createElement('button');
       btn.className = 'agg-btn';
       btn.textContent = opt.label;
       btn.dataset.minutes = String(opt.val);
       if (opt.val === cfg.agg) btn.classList.add('active');
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', ()=>{
         cfg.agg = opt.val;
-        // visual active
-        toolbar.querySelectorAll('.agg-btn').forEach(b => b.classList.remove('active'));
+        toolbar.querySelectorAll('.agg-btn').forEach(b=>b.classList.remove('active'));
         btn.classList.add('active');
-        // re-render
         redrawSeries(cfg);
       });
       toolbar.appendChild(btn);
@@ -166,50 +155,51 @@
     // Plotly inicial (vacío)
     const labels = new Array(MAX_BARS).fill('');
     const values = new Array(MAX_BARS).fill(null);
+
     Plotly.newPlot(divId, [{
-      x: labels.map((_, i) => i),
+      x: labels.map((_,i)=>i),
       y: values,
-      type: 'bar',
+      type:'bar',
       name: cfg.title,
-      marker: { color: cfg.color }
+      marker:{ color: cfg.color }
     }], {
-      title: cfg.title,
+      title: { text: cfg.title, font: { size: 20, color: '#000' } },
       xaxis: {
         type: 'category',
-        tickmode: 'array',
+        tickmode:'array',
         tickvals: labels.map((_,i)=>i),
         ticktext: buildTickText(labels),
-        tickangle: -45,
-        automargin: true
+        tickangle:-45,
+        automargin:true,
+        title: { text: '<b>Fecha y Hora de Medición</b>', font: { size: 16, color:'#000' } },
+        tickfont: { size: 15, color:'#000' }
       },
       yaxis: {
-        title: cfg.yTitle,
-        rangemode: 'tozero',
-        autorange: true,
-        fixedrange: false
+        title: { text: `<b>${cfg.yTitle}</b>`, font: { size: 16, color:'#000' } },
+        tickfont: { size: 15, color:'#000' },
+        rangemode:'tozero',
+        autorange:true,
+        fixedrange:false
       },
-      margin: { t: 50, l: 60, r: 20, b: 110 },
-      bargap: 0.2,
-      paper_bgcolor: '#cce5dc',
-      plot_bgcolor: '#cce5dc',
-      showlegend: false
-    }, { responsive: true });
+      margin:{ t:60, l:60, r:20, b:110 },
+      bargap:0.2,
+      paper_bgcolor:'#cce5dc',
+      plot_bgcolor:'#cce5dc',
+      showlegend:false
+    }, { responsive:true });
   }
 
   // ===================== Data builders =====================
-  // 5 min -> 24 últimas muestras crudas
   function getLast24RawForKey(key) {
     const last = raw.slice(-MAX_BARS);
     const labels = last.map(r => labelFromMs(r.ts));
     const values = last.map(r => Number(r[key]));
     return { labels, values };
   }
-  // agregado -> últimos 24 bins con datos (sin huecos)
+  // últimos 24 bins CON datos, sin huecos
   function getAgg24ForKey(key, minutes) {
-    if (!raw.length) return { labels:new Array(MAX_BARS).fill(''), values:new Array(MAX_BARS).fill(null) };
-
-    // Agrupar por binStart = floorToBin(ts, minutes)
-    const groups = new Map(); // binStartMs -> {sum, count}
+    if (!raw.length) return { labels: new Array(MAX_BARS).fill(''), values: new Array(MAX_BARS).fill(null) };
+    const groups = new Map(); // binStartMs -> {sum,count}
     for (const r of raw) {
       const bin = floorToBin(r.ts, minutes);
       const val = Number(r[key]);
@@ -218,8 +208,6 @@
       g.sum += val; g.count += 1;
       groups.set(bin, g);
     }
-
-    // Ordenar y tomar los últimos 24 bins con datos
     const binKeys = Array.from(groups.keys()).sort((a,b)=>a-b);
     const take = binKeys.slice(-MAX_BARS);
     const labels = take.map(b => labelFromMs(b));
@@ -234,34 +222,36 @@
     values = values.slice(-MAX_BARS);
     while (labels.length < MAX_BARS) labels.unshift('');
     while (values.length < MAX_BARS) values.unshift(null);
-
     if (cfg.round) values = values.map(v => Number.isFinite(v) ? Math.round(v) : v);
 
-    const xIdx = labels.map((_, i) => i);
+    const xIdx = labels.map((_,i)=>i);
     Plotly.react(cfg.divId, [{
-      x: xIdx, y: values, type: 'bar', name: cfg.title, marker: { color: cfg.color }
+      x: xIdx, y: values, type:'bar', name: cfg.title, marker:{ color: cfg.color }
     }], {
-      title: cfg.title,
+      title: { text: cfg.title, font: { size: 20, color: '#000' } },
       xaxis: {
         type: 'category',
-        tickmode: 'array',
+        tickmode:'array',
         tickvals: xIdx,
         ticktext: buildTickText(labels),
-        tickangle: -45,
-        automargin: true
+        tickangle:-45,
+        automargin:true,
+        title: { text:'<b>Fecha y Hora de Medición</b>', font:{ size:16, color:'#000' } },
+        tickfont: { size: 15, color:'#000' }
       },
       yaxis: {
-        title: cfg.yTitle,
-        rangemode: 'tozero',
-        autorange: true,
-        fixedrange: false
+        title: { text:`<b>${cfg.yTitle}</b>`, font:{ size:16, color:'#000' } },
+        tickfont: { size: 15, color:'#000' },
+        rangemode:'tozero',
+        autorange:true,
+        fixedrange:false
       },
-      margin: { t: 50, l: 60, r: 20, b: 110 },
-      bargap: 0.2,
-      paper_bgcolor: '#cce5dc',
-      plot_bgcolor: '#cce5dc',
-      showlegend: false
-    }, { responsive: true });
+      margin:{ t:60, l:60, r:20, b:110 },
+      bargap:0.2,
+      paper_bgcolor:'#cce5dc',
+      plot_bgcolor:'#cce5dc',
+      showlegend:false
+    }, { responsive:true });
   }
 
   function redrawSeries(cfg) {
@@ -270,33 +260,23 @@
     setChartData(cfg, data.labels, data.values);
   }
 
-  // ===================== Crear charts y toolbars =====================
+  // ===================== Crear charts =====================
   Object.values(SERIES).forEach(makeChart);
 
   // ===================== Carga inicial (histórico) =====================
   const base = db.ref('/historial_mediciones').orderByKey().limitToLast(INITIAL_FETCH_LIMIT);
   base.once('value', snap => {
-    const obj = snap.val();
-    if (!obj) return;
-    const entries = Object.entries(obj).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)); // viejo->nuevo
-
-    entries.forEach(([k, v]) => {
+    const obj = snap.val(); if (!obj) return;
+    const entries = Object.entries(obj).sort(([a],[b]) => (a<b?-1:a>b?1:0));
+    entries.forEach(([k,v])=>{
       if (v && v.fecha) lastMarkerDateISO = toIsoDate(v.fecha) || lastMarkerDateISO;
-      const dateISO = (v && v.fecha) ? toIsoDate(v.fecha)
-                                     : (lastMarkerDateISO || new Date().toISOString().slice(0, 10));
-      const ts = parseTsFrom(dateISO, v || {});
-      if (Number.isFinite(ts)) {
-        raw.push({
-          key: k, ts,
-          co2: v?.co2 ?? 0,
-          cTe: v?.cTe ?? 0,
-          cHu: v?.cHu ?? 0
-        });
+      const dateISO = (v && v.fecha) ? toIsoDate(v.fecha) : (lastMarkerDateISO || new Date().toISOString().slice(0,10));
+      const ts = parseTsFrom(dateISO, v||{});
+      if (Number.isFinite(ts)){
+        raw.push({ key:k, ts, co2: v?.co2 ?? 0, cTe: v?.cTe ?? 0, cHu: v?.cHu ?? 0 });
       }
     });
-    raw.sort((a, b) => a.ts - b.ts);
-
-    // Render inicial según agg de cada serie
+    raw.sort((a,b)=>a.ts-b.ts);
     Object.values(SERIES).forEach(redrawSeries);
   });
 
@@ -306,15 +286,14 @@
   liveRef.on('child_added', snap => {
     const k = snap.key, v = snap.val() || {};
     if (v && v.fecha) lastMarkerDateISO = toIsoDate(v.fecha) || lastMarkerDateISO;
-    const dateISO = (v && v.fecha) ? toIsoDate(v.fecha)
-                                   : (lastMarkerDateISO || new Date().toISOString().slice(0, 10));
+    const dateISO = (v && v.fecha) ? toIsoDate(v.fecha) : (lastMarkerDateISO || new Date().toISOString().slice(0,10));
     const ts = parseTsFrom(dateISO, v);
-    if (Number.isFinite(ts)) {
-      raw.push({ key: k, ts, co2: v?.co2 ?? 0, cTe: v?.cTe ?? 0, cHu: v?.cHu ?? 0 });
-      raw.sort((a, b) => a.ts - b.ts);
+    if (Number.isFinite(ts)){
+      raw.push({ key:k, ts, co2:v?.co2??0, cTe:v?.cTe??0, cHu:v?.cHu??0 });
+      raw.sort((a,b)=>a.ts-b.ts);
       Object.values(SERIES).forEach(redrawSeries);
     }
-    if (window.staleMsFromFechaHora && window.staleMarkUpdate) {
+    if (window.staleMsFromFechaHora && window.staleMarkUpdate){
       const msData = window.staleMsFromFechaHora(dateISO, v.hora || v.tiempo);
       window.staleMarkUpdate(msData);
     }
@@ -323,17 +302,16 @@
   liveRef.on('child_changed', snap => {
     const k = snap.key, v = snap.val() || {};
     if (v && v.fecha) lastMarkerDateISO = toIsoDate(v.fecha) || lastMarkerDateISO;
-    const dateISO = (v && v.fecha) ? toIsoDate(v.fecha)
-                                   : (lastMarkerDateISO || new Date().toISOString().slice(0, 10));
+    const dateISO = (v && v.fecha) ? toIsoDate(v.fecha) : (lastMarkerDateISO || new Date().toISOString().slice(0,10));
     const ts = parseTsFrom(dateISO, v);
-    if (Number.isFinite(ts)) {
-      const idx = raw.findIndex(r => r.key === k);
-      const rec = { key: k, ts, co2: v?.co2 ?? 0, cTe: v?.cTe ?? 0, cHu: v?.cHu ?? 0 };
-      if (idx >= 0) raw[idx] = rec; else raw.push(rec);
-      raw.sort((a, b) => a.ts - b.ts);
+    if (Number.isFinite(ts)){
+      const idx = raw.findIndex(r=>r.key===k);
+      const rec = { key:k, ts, co2:v?.co2??0, cTe:v?.cTe??0, cHu:v?.cHu??0 };
+      if (idx>=0) raw[idx]=rec; else raw.push(rec);
+      raw.sort((a,b)=>a.ts-b.ts);
       Object.values(SERIES).forEach(redrawSeries);
     }
-    if (window.staleMsFromFechaHora && window.staleMarkUpdate) {
+    if (window.staleMsFromFechaHora && window.staleMarkUpdate){
       const msData = window.staleMsFromFechaHora(dateISO, v.hora || v.tiempo);
       window.staleMarkUpdate(msData);
     }
