@@ -1,245 +1,381 @@
-// grafpart.js
-window.addEventListener("load", () => {
-  const MAX_POINTS = 24; // mostrar últimos 24
+// grafpart.js — PM1.0, PM2.5, PM4.0, PM10 con selector, 24 barras, títulos manuales y ejes formateados + Y dinámico
+(function () {
+  'use strict';
 
-  const loadingClass = 'loading-msg';
-  ["chartPM1","chartPM2_5","chartPM4_0","chartPM10"].forEach(addLoading);
+  const MAX_BARS = 24;
+  const INITIAL_FETCH_LIMIT = 5000;  // histórico suficiente para agregación
+  const SAMPLE_BASE_MIN = 5;         // una muestra cada 5 minutos
+  const db = firebase.database();
 
-  let firstData = false;
-  function removeLoading(){
-    if(firstData) return; firstData = true;
-    // Elimina solo los divs de mensaje de carga, nunca la gráfica
-    document.querySelectorAll('.loading-msg').forEach(n=>{
-      const p=n.parentNode; if(n.parentNode) n.parentNode.removeChild(n); if(p) p.style.paddingTop='';
-    });
-  }
-  function addLoading(divId){
-    const el = document.getElementById(divId);
-    if(!el) return;
-    el.style.position = 'relative';
-    if(!el.querySelector('.'+loadingClass)){
-      el.insertAdjacentHTML('afterbegin', '<div class="'+loadingClass+'" style="position:absolute;top:4px;left:0;width:100%;text-align:center;font-size:28px;font-weight:bold;color:#000;letter-spacing:.5px;pointer-events:none;">Cargando datos...</div>');
-      el.style.paddingTop = '36px';
-    }
-  }
+  // Colores (respetando los originales)
+  const COLORS = {
+    PM1:  'red',
+    PM25: '#bfa600',  // amarillo oscuro
+    PM40: '#00bfbf',  // turquesa
+    PM10: '#bf00ff'
+  };
 
-  function initBar(divId, label, color, yMin, yMax) {
-    Plotly.newPlot(divId, [{
-      x: Array.from({ length: MAX_POINTS }, (_, i) => i),
-      y: new Array(MAX_POINTS).fill(null),
-      type: 'bar',
-      name: label,
-      marker: { color }
-    }], {
-      title: {
-        text: label,
-        font: { size: 20, color: 'black', family: 'Arial', weight: 'bold' }
-      },
-      xaxis: {
-        title: {
-          text: 'Fecha y Hora de Medición',
-          font: { size: 16, color: 'black', family: 'Arial', weight: 'bold' },
-          standoff: 30
-        },
-        type: 'category',
-        tickfont: { color: 'black', size: 14, family: 'Arial', weight: 'bold' },
-        gridcolor: 'black',
-        linecolor: 'black',
-        autorange: true,
-        tickangle: -45,
-      },
-      yaxis: {
-        title: {
-          text: label,
-          font: { size: 16, color: 'black', family: 'Arial', weight: 'bold' }
-        },
-        tickfont: { color: 'black', size: 14, family: 'Arial', weight: 'bold' },
-        gridcolor: 'black',
-        linecolor: 'black',
-        // Forzar control manual del rango del eje Y
-        autorange: false,
-        fixedrange: false,
-        // Rango inicial por defecto (se actualizará dinámicamente con los datos)
-        range: (yMin !== null && yMax !== null) ? [yMin, yMax] : [0, 10]
-      },
-      plot_bgcolor: '#cce5dc',
-      paper_bgcolor: '#cce5dc',
-      margin: { t: 50, l: 60, r: 40, b: 110 },
-      bargap: 0.2
-    }, {
-      responsive: true,
-      useResizeHandler: true
-    });
-  }
+  // ============= CSS del selector (compacto) + títulos manuales =============
+  (function injectSelectorCSS(){
+    if (document.getElementById('agg-toolbar-css')) return;
+    const style = document.createElement('style');
+    style.id = 'agg-toolbar-css';
+    style.textContent = `
+      .agg-toolbar-wrap{
+        display:flex; flex-direction:column; gap:6px; margin:8px 0 4px 0; width:100%;
+      }
+      .agg-chart-title{
+        font-weight:bold; font-size:20px; color:#000; text-align:center; line-height:1.1;
+      }
+      .agg-toolbar-label{
+        font-weight:bold; font-size:16px; color:#000; text-align:left;
+      }
+      .agg-toolbar{
+        display:flex; gap:6px; flex-wrap:wrap; align-items:center; justify-content:flex-start;
+        --agg-btn-w: 80px;
+      }
+      .agg-btn{
+        cursor:pointer; user-select:none;
+        padding:6px 10px; border-radius:10px;
+        background:#e9f4ef; border:2px solid #2a2a2a;
+        font-size:12px; font-weight:600; color:#000;
+        width: var(--agg-btn-w);
+        text-align:center;
+        transition: transform 0.12s ease, box-shadow 0.12s ease, font-size 0.12s ease;
+      }
+      .agg-btn:hover{ box-shadow:0 1px 0 rgba(0,0,0,.35); }
+      .agg-btn.active{
+        transform: scale(1.06);
+        font-weight:bold;
+        font-size:14px;
+        background:#d9efe7;
+      }
+    `;
+    document.head.appendChild(style);
+  })();
 
-  function toIsoDate(fecha){
-    if(!fecha || typeof fecha !== 'string'){
-      const d=new Date();
-      const mm=String(d.getMonth()+1).padStart(2,'0');
-      const dd=String(d.getDate()).padStart(2,'0');
+  // ===================== Helpers de fecha/hora =====================
+  function toIsoDate(fecha) {
+    if (!fecha || typeof fecha !== 'string') {
+      const d = new Date();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
       return `${d.getFullYear()}-${mm}-${dd}`;
     }
-    const [dd,mm,yyyy] = fecha.split('-');
-    return `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
-  }
-  function addDays(isoDate, days){ const d=new Date(isoDate+'T00:00:00'); d.setDate(d.getDate()+days); const yyyy=d.getFullYear(); const mm=String(d.getMonth()+1).padStart(2,'0'); const dd=String(d.getDate()).padStart(2,'0'); return `${yyyy}-${mm}-${dd}`; }
-  function inferDatesForEntries(entries){
-    const n = entries.length; const dates = new Array(n).fill(null); const markers=[];
-    for(let i=n-1;i>=0;i--){ const v=entries[i][1]; if(v && v.fecha){ markers.push(i);} }
-    if(markers.length>0){
-      const M0=markers[0]; const dateM0=toIsoDate(entries[M0][1].fecha); for(let i=M0;i<n;i++){ dates[i]=dateM0; }
-      for(let j=0;j<markers.length-1;j++){ const Ma=markers[j], Mb=markers[j+1]; const dateMa=toIsoDate(entries[Ma][1].fecha); const assigned=addDays(dateMa,-1); for(let i=Mb+1;i<Ma;i++){ dates[i]=assigned; } dates[Mb]=toIsoDate(entries[Mb][1].fecha);} 
-      const Mlast=markers[markers.length-1]; const assignedOld=addDays(toIsoDate(entries[Mlast][1].fecha),-1); for(let i=0;i<Mlast;i++){ dates[i]=assignedOld; }
+    const parts = fecha.split(/[-/]/);
+    if (parts.length !== 3) return new Date().toISOString().slice(0, 10);
+    if (parts[0].length === 4) {
+      const [yyyy, mm, dd] = parts;
+      return `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
     } else {
-      const today=toIsoDate(); for(let i=0;i<n;i++){ dates[i]=today; }
+      const [dd, mm, yyyy] = parts;
+      return `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
     }
-    return dates;
   }
-  function makeTimestampWithDate(isoDate, v){ const h=v.hora||v.tiempo||'00:00:00'; return `${isoDate} ${h}`; }
-  function makeTimestamp(v){
-    const isoDate = toIsoDate(v.fecha);
-    const h = v.hora || v.tiempo || '00:00:00';
-    return `${isoDate} ${h}`;
+  function parseTsFrom(isoDate, v) {
+    const raw = (v && (v.hora || v.tiempo)) ? (v.hora || v.tiempo) : '00:00';
+    const hhmmss = /^\d{1,2}:\d{2}$/.test(raw) ? `${raw}:00` : raw;
+    const ms = Date.parse(`${isoDate}T${hhmmss}`);
+    return Number.isFinite(ms) ? ms : null;
+  }
+  function floorToBin(ts, minutes) {
+    const size = minutes * 60000;
+    return ts - (ts % size);
+  }
+  function avg(arr) {
+    const v = arr.filter(n => Number.isFinite(n));
+    if (!v.length) return null;
+    return v.reduce((a,b)=>a+b,0)/v.length;
+  }
+  function labelFromMs(ms) {
+    const d=new Date(ms);
+    const yyyy=d.getFullYear(), mm=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+    const hh=String(d.getHours()).padStart(2,'0'), mi=String(d.getMinutes()).padStart(2,'0');
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+  }
+  function buildTickText(labels) {
+    const t = []; let prevDate=null; let seen=false;
+    for (let i=0;i<labels.length;i++){
+      const s = String(labels[i] ?? '');
+      const m = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})/);
+      let datePart='', timePart='';
+      if (m) { datePart=m[1]; timePart=m[2]; }
+      const ddmmyyyy = datePart ? datePart.split('-').reverse().join('-') : '';
+      const isFirst = (!seen && !!datePart);
+      const changed = datePart && prevDate && (datePart !== prevDate);
+      const showDate = isFirst || changed;
+      t.push(showDate && datePart ? `${timePart}<br>${ddmmyyyy}` : (timePart || s));
+      if (datePart) { if(!seen) seen=true; prevDate=datePart; }
+    }
+    return t;
   }
 
-  function BarSeries(divId) {
-    this.divId = divId;
-    this.slotIdx = Array.from({ length: MAX_POINTS }, (_, i) => i);
-    this.lbl = new Array(MAX_POINTS).fill('');
-    this.y   = new Array(MAX_POINTS).fill(null);
-    this.keys= new Array(MAX_POINTS).fill(null);
-    this.count = 0; // <<-- NUEVO: cuántos puntos válidos hay ya pintados (0..MAX_POINTS)
-  }
+  // ===================== Rango dinámico del eje Y =====================
   function updateYAxisRange(divId, yValues){
-    // Calcular el máximo dentro de los últimos (hasta) 24 puntos y fijar el eje Y
     const finite = (yValues||[]).filter(v => Number.isFinite(v) && v >= 0);
     const maxVal = finite.length ? Math.max(...finite) : 0;
-    // Escala: doble del dato más grande; si no hay datos, usar 1 como mínimo visible
-    const upper = (maxVal > 0) ? (maxVal * 2) : 1;
-    Plotly.relayout(divId, {
-      'yaxis.autorange': false,
-      'yaxis.range': [0, upper]
-    });
+    const upper  = (maxVal > 0) ? (maxVal * 2) : 1;
+    Plotly.relayout(divId, { 'yaxis.autorange': false, 'yaxis.range': [0, upper] });
   }
-        function updateXAxisTicks(divId, xVals, labels){
-    const tickvals = Array.isArray(xVals) ? xVals : [];
-    const vals = Array.isArray(labels) ? labels : [];
-    const ticktext = [];
-    let prevDate = null;
-    let seen = false;
-    for(let i=0; i<vals.length; i++){
-      const s = String(vals[i] ?? '');
-      const m = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2}(?::\d{2})?)/);
-      let datePart = '', timePart = '';
-      if(m){ datePart = m[1]; timePart = m[2]; }
-      else { const parts = s.split(/\s+/); datePart = parts[0] || ''; timePart = parts[1] || parts[0] || ''; }
-      const hhmm = (timePart || '').split(':').slice(0,2).join(':') || s;
-      const isFirstNonEmpty = (!seen && !!datePart);
-      const dateChanged = datePart && prevDate && (datePart !== prevDate);
-      const showDate = isFirstNonEmpty || dateChanged;
-      const dispDate = datePart ? datePart.split('-').slice(0,3).reverse().join('-') : '';
-      ticktext.push(showDate && datePart ? `${hhmm}<br>${dispDate}` : hhmm);
-      if(datePart){ if(!seen) seen = true; prevDate = datePart; }
-    }
-    Plotly.relayout(divId, {
-      'xaxis.tickmode': 'array',
-      'xaxis.tickvals': tickvals,
-      'xaxis.ticktext': ticktext
-    });
-  }
-  BarSeries.prototype.addPoint = function(key, label, value) {
-    if (this.keys.includes(key)) return; // evitar duplicados
 
-    if (this.count < MAX_POINTS) {
-      // Aún no está llena la serie: coloca de IZQ -> DER
-      const idx = this.count;
-      this.y[idx]    = value;
-      this.lbl[idx]  = label;
-      this.keys[idx] = key;
-      this.count++;
-
-      // Actualiza trazado
-      Plotly.update(this.divId, { x: [this.slotIdx], y: [this.y] });
-    } else {
-      // Ventana llena (24): desliza IZQ, agrega DER (tu comportamiento actual)
-      this.y.shift();    this.y.push(value);
-      this.lbl.shift();  this.lbl.push(label);
-      this.keys.shift(); this.keys.push(key);
-
-      Plotly.update(this.divId, { x: [this.slotIdx], y: [this.y] });
-    }
-
-    updateXAxisTicks(this.divId, this.slotIdx, this.lbl);
-    updateYAxisRange(this.divId, this.y);
-  };
-  BarSeries.prototype.updatePoint = function(key, newValue) {
-    const idx = this.keys.indexOf(key);
-    if (idx === -1) return;
-    this.y[idx] = newValue;
-    Plotly.restyle(this.divId, { y: [this.y] });
-    updateXAxisTicks(this.divId, this.slotIdx, this.lbl);
-    updateYAxisRange(this.divId, this.y);
-  };
-
-  // Inicializar gráficas (sin rango fijo; se ajusta dinámicamente)
-  initBar("chartPM1", "PM1.0 µg/m³", "red", null, null);
-  initBar("chartPM2_5", "PM2.5 µg/m³", "#bfa600", null, null); // amarillo oscuro
-  initBar("chartPM4_0", "PM4.0 µg/m³", "#00bfbf", null, null); // turquesa
-  initBar("chartPM10", "PM10.0 µg/m³", "#bf00ff", null, null);
-
-  const sPM1 = new BarSeries('chartPM1');
-  const sPM25 = new BarSeries('chartPM2_5');
-  const sPM40 = new BarSeries('chartPM4_0');
-  const sPM10 = new BarSeries('chartPM10');
-
-  const db = firebase.database();
-  const baseQuery = db.ref('/historial_mediciones').orderByKey().limitToLast(MAX_POINTS);
-
-  // Cargar los últimos 15 existentes
+  // ===================== Estado crudo =====================
+  // Cada registro: { key, ts, pm1p0, pm2p5, pm4p0, pm10p0 }
+  let raw = [];
   let lastMarkerDateISO = null;
-  baseQuery.once('value', snap => {
-    const dataObj = snap.val();
-    if (!dataObj) return;
-    const entries = Object.entries(dataObj).sort(([a],[b])=> (a<b?-1:a>b?1:0));
-    const inferredDates = inferDatesForEntries(entries);
-    entries.forEach(([key, val], idx) => {
-      const dateISO = inferredDates[idx];
-      if(val && val.fecha) lastMarkerDateISO = toIsoDate(val.fecha);
-      const label = makeTimestampWithDate(dateISO, val);
-      sPM1.addPoint(key, label, val.pm1p0 ?? 0);
-      sPM25.addPoint(key, label, val.pm2p5 ?? 0);
-      sPM40.addPoint(key, label, val.pm4p0 ?? 0);
-      sPM10.addPoint(key, label, val.pm10p0 ?? 0);
+
+  // ===================== Config por serie =====================
+  const SERIES = {
+    PM1:  { divId:'chartPM1',   title:'PM1.0 µg/m³',   color:COLORS.PM1,  key:'pm1p0', yTitle:'PM1.0 µg/m³',   agg:5 },
+    PM25: { divId:'chartPM2_5', title:'PM2.5 µg/m³',   color:COLORS.PM25, key:'pm2p5', yTitle:'PM2.5 µg/m³',   agg:5 },
+    PM40: { divId:'chartPM4_0', title:'PM4.0 µg/m³',   color:COLORS.PM40, key:'pm4p0', yTitle:'PM4.0 µg/m³',   agg:5 },
+    PM10: { divId:'chartPM10',  title:'PM10.0 µg/m³',  color:COLORS.PM10, key:'pm10p0',yTitle:'PM10.0 µg/m³',  agg:5 }
+  };
+
+  const MENU = [
+    { label:'5 min',  val:5   },
+    { label:'15 min', val:15  },
+    { label:'30 min', val:30  },
+    { label:'1 hr',   val:60  },
+    { label:'2 hr',   val:120 },
+    { label:'4 hr',   val:240 }
+  ];
+
+  // ===================== Crear chart + toolbar por serie (título manual) =====================
+  function makeChart(cfg) {
+    const divId = cfg.divId;
+    const chartEl = document.getElementById(divId);
+
+    // Título manual + selector
+    const wrap = document.createElement('div');
+    wrap.className = 'agg-toolbar-wrap';
+    wrap.innerHTML = `
+      <div class="agg-chart-title">${cfg.yTitle}</div>
+      <div class="agg-toolbar-label">Seleccione el intervalo de lecturas</div>
+      <div class="agg-toolbar" id="tb-${divId}"></div>
+    `;
+    chartEl.parentElement.insertBefore(wrap, chartEl);
+
+    const toolbar = wrap.querySelector(`#tb-${divId}`);
+    MENU.forEach(opt=>{
+      const btn = document.createElement('button');
+      btn.className = 'agg-btn';
+      btn.textContent = opt.label;
+      btn.dataset.minutes = String(opt.val);
+      if (opt.val === cfg.agg) btn.classList.add('active');
+      btn.addEventListener('click', ()=>{
+        cfg.agg = opt.val;
+        toolbar.querySelectorAll('.agg-btn').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        redrawSeries(cfg);
+      });
+      toolbar.appendChild(btn);
     });
-    removeLoading();
+
+    // Plotly inicial
+    const labels = new Array(MAX_BARS).fill('');
+    const values = new Array(MAX_BARS).fill(null);
+    Plotly.newPlot(divId, [{
+      x: labels.map((_,i)=>i),
+      y: values,
+      type:'bar',
+      name: cfg.title,
+      marker:{ color: cfg.color }
+    }], {
+      // sin title (usamos el manual)
+      xaxis: {
+        type: 'category',
+        tickmode:'array',
+        tickvals: labels.map((_,i)=>i),
+        ticktext: buildTickText(labels),
+        tickangle:-45,
+        automargin:true,
+        gridcolor:'black',
+        linecolor:'black',
+        autorange: true,
+        title: { text: '<b>Fecha y Hora de Medición</b>', font: { size:16,color:'black',family:'Arial',weight:'bold'}, standoff: 30 },
+        tickfont: { color:'black',size:14,family:'Arial',weight:'bold' }
+      },
+      yaxis: {
+        title: { text: `<b>${cfg.yTitle}</b>`, font: { size:16,color:'black',family:'Arial',weight:'bold' } },
+        tickfont: { color:'black',size:14,family:'Arial',weight:'bold' },
+        rangemode:'tozero',
+        gridcolor:'black',
+        linecolor:'black',
+        autorange: true,
+        fixedrange:false
+      },
+      margin:{ t:20, l:60, r:40, b:110 },
+      bargap:0.2,
+      paper_bgcolor:'#cce5dc',
+      plot_bgcolor:'#cce5dc',
+      showlegend:false
+    }, { responsive:true });
+
+    // Ajuste inicial de Y (aunque todo sea null, quedará [0,1])
+    updateYAxisRange(divId, values);
+  }
+
+  // ===================== Data builders =====================
+  // 5 min: últimas 24 crudas (por key)
+  function getLast24RawForKey(key) {
+    const last = raw.slice(-MAX_BARS);
+    const labels = last.map(r => labelFromMs(r.ts));
+    const values = last.map(r => Number(r[key]));
+    return { labels, values };
+  }
+  // Agregado: últimos 24 bins COMPLETOS (sin huecos)
+  function getAgg24ForKey(key, minutes) {
+    if (!raw.length) return { labels: new Array(MAX_BARS).fill(''), values: new Array(MAX_BARS).fill(null) };
+
+    const groups = new Map(); // binStartMs -> {sum,count}
+    for (const r of raw) {
+      const bin = floorToBin(r.ts, minutes);
+      const val = Number(r[key]);
+      if (!Number.isFinite(val)) continue;
+      const g = groups.get(bin) || { sum:0, count:0 };
+      g.sum += val; g.count += 1;
+      groups.set(bin, g);
+    }
+
+    // Bin completo = al menos minutes / SAMPLE_BASE_MIN muestras
+    const required = Math.max(1, Math.round(minutes / SAMPLE_BASE_MIN));
+    const completeKeys = Array.from(groups.keys())
+      .filter(k => groups.get(k).count >= required)
+      .sort((a,b)=>a-b);
+
+    const take = completeKeys.slice(-MAX_BARS);
+    const labels = take.map(b => labelFromMs(b));
+    const values = take.map(b => groups.get(b).sum / groups.get(b).count);
+    return { labels, values };
+  }
+
+  // ===================== Pintado =====================
+  function setChartData(cfg, labels, values) {
+    labels = labels.slice(-MAX_BARS);
+    values = values.slice(-MAX_BARS);
+    while (labels.length < MAX_BARS) labels.unshift('');
+    while (values.length < MAX_BARS) values.unshift(null);
+
+    const xIdx = labels.map((_,i)=>i);
+    Plotly.react(cfg.divId, [{
+      x: xIdx, y: values, type:'bar', name: cfg.title, marker:{ color: cfg.color }
+    }], {
+      xaxis: {
+        type: 'category',
+        tickmode:'array',
+        tickvals: xIdx,
+        ticktext: buildTickText(labels),
+        tickangle:-45,
+        automargin:true,
+        gridcolor:'black',
+        linecolor:'black',
+        autorange: true,
+        title: { text:'<b>Fecha y Hora de Medición</b>', font:{ size:16,color:'black',family:'Arial',weight:'bold' }, standoff: 30 },
+        tickfont: { color:'black',size:14,family:'Arial',weight:'bold' }
+      },
+      yaxis: {
+        title: { text:`<b>${cfg.yTitle}</b>`, font:{ size:16,color:'black',family:'Arial',weight:'bold' } },
+        tickfont: { color:'black',size:14,family:'Arial',weight:'bold' },
+        rangemode:'tozero',
+        gridcolor:'black',
+        linecolor:'black',
+        autorange: true,
+        fixedrange:false
+      },
+      margin:{ t:20, l:60, r:40, b:110 },
+      bargap:0.2,
+      paper_bgcolor:'#cce5dc',
+      plot_bgcolor:'#cce5dc',
+      showlegend:false
+    }, { responsive:true });
+
+    // Ajuste dinámico del eje Y después de pintar
+    updateYAxisRange(cfg.divId, values);
+  }
+
+  function redrawSeries(cfg) {
+    const data = (cfg.agg === 5) ? getLast24RawForKey(cfg.key)
+                                 : getAgg24ForKey(cfg.key, cfg.agg);
+    setChartData(cfg, data.labels, data.values);
+  }
+
+  // ===================== Crear charts =====================
+  Object.values(SERIES).forEach(makeChart);
+
+  // ===================== Carga inicial (histórico) =====================
+  const base = db.ref('/historial_mediciones').orderByKey().limitToLast(INITIAL_FETCH_LIMIT);
+  base.once('value', snap => {
+    const obj = snap.val(); if (!obj) return;
+    const entries = Object.entries(obj).sort(([a],[b]) => (a<b?-1:a>b?1:0)); // viejo->nuevo
+    entries.forEach(([k,v])=>{
+      if (v && v.fecha) lastMarkerDateISO = toIsoDate(v.fecha) || lastMarkerDateISO;
+      const dateISO = (v && v.fecha) ? toIsoDate(v.fecha)
+                                     : (lastMarkerDateISO || new Date().toISOString().slice(0,10));
+      const ts = parseTsFrom(dateISO, v||{});
+      if (Number.isFinite(ts)){
+        raw.push({
+          key:k, ts,
+          pm1p0: v?.pm1p0 ?? 0,
+          pm2p5: v?.pm2p5 ?? 0,
+          pm4p0: v?.pm4p0 ?? 0,
+          pm10p0: v?.pm10p0 ?? 0
+        });
+      }
+    });
+    raw.sort((a,b)=>a.ts-b.ts);
+    Object.values(SERIES).forEach(redrawSeries);
   });
 
-  // Escuchar nuevos (después de los ya cargados)
-  db.ref('/historial_mediciones').limitToLast(1).on('child_added', snap => {
-    const key = snap.key;
-    const val = snap.val();
-    if(val && val.fecha){ lastMarkerDateISO = toIsoDate(val.fecha); }
-    const dateISO = (val && val.fecha) ? toIsoDate(val.fecha) : (lastMarkerDateISO || toIsoDate());
-    const label = makeTimestampWithDate(dateISO, val||{});
-    sPM1.addPoint(key, label, val?.pm1p0 ?? 0);
-    sPM25.addPoint(key, label, val?.pm2p5 ?? 0);
-    sPM40.addPoint(key, label, val?.pm4p0 ?? 0);
-    sPM10.addPoint(key, label, val?.pm10p0 ?? 0);
+  // ===================== Tiempo real =====================
+  const liveRef = db.ref('/historial_mediciones').limitToLast(1);
 
-    const msData = staleMsFromISOAndRecord(dateISO, val || {});
-    staleMarkUpdate(msData);
+  liveRef.on('child_added', snap => {
+    const k = snap.key, v = snap.val() || {};
+    if (v && v.fecha) lastMarkerDateISO = toIsoDate(v.fecha) || lastMarkerDateISO;
+    const dateISO = (v && v.fecha) ? toIsoDate(v.fecha)
+                                   : (lastMarkerDateISO || new Date().toISOString().slice(0,10));
+    const ts = parseTsFrom(dateISO, v);
+    if (Number.isFinite(ts)){
+      raw.push({
+        key:k, ts,
+        pm1p0: v?.pm1p0 ?? 0,
+        pm2p5: v?.pm2p5 ?? 0,
+        pm4p0: v?.pm4p0 ?? 0,
+        pm10p0: v?.pm10p0 ?? 0
+      });
+      raw.sort((a,b)=>a.ts-b.ts);
+      Object.values(SERIES).forEach(redrawSeries);
+    }
+    // Alerta de inactividad (si está disponible)
+    if (window.staleMsFromFechaHora && window.staleMarkUpdate) {
+      const msData = window.staleMsFromFechaHora(dateISO, v.hora || v.tiempo);
+      window.staleMarkUpdate(msData);
+    }
   });
 
-  // Actualización si se modifica el último nodo
-  db.ref('/historial_mediciones').limitToLast(1).on('child_changed', snap => {
-    const key = snap.key;
-    const val = snap.val();
-    sPM1.updatePoint(key, val.pm1p0 ?? 0);
-    sPM25.updatePoint(key, val.pm2p5 ?? 0);
-    sPM40.updatePoint(key, val.pm4p0 ?? 0);
-    sPM10.updatePoint(key, val.pm10p0 ?? 0);
-    const dateISO = (val && val.fecha) ? toIsoDate(val.fecha) : (lastMarkerDateISO || toIsoDate());
-    const msData = staleMsFromISOAndRecord(dateISO, val || {});
-    staleMarkUpdate(msData);
+  liveRef.on('child_changed', snap => {
+    const k = snap.key, v = snap.val() || {};
+    if (v && v.fecha) lastMarkerDateISO = toIsoDate(v.fecha) || lastMarkerDateISO;
+    const dateISO = (v && v.fecha) ? toIsoDate(v.fecha)
+                                   : (lastMarkerDateISO || new Date().toISOString().slice(0,10));
+    const ts = parseTsFrom(dateISO, v);
+    if (Number.isFinite(ts)){
+      const idx = raw.findIndex(r=>r.key===k);
+      const rec = {
+        key:k, ts,
+        pm1p0: v?.pm1p0 ?? 0,
+        pm2p5: v?.pm2p5 ?? 0,
+        pm4p0: v?.pm4p0 ?? 0,
+        pm10p0: v?.pm10p0 ?? 0
+      };
+      if (idx>=0) raw[idx] = rec; else raw.push(rec);
+      raw.sort((a,b)=>a.ts-b.ts);
+      Object.values(SERIES).forEach(redrawSeries);
+    }
+    if (window.staleMsFromFechaHora && window.staleMarkUpdate) {
+      const msData = window.staleMsFromFechaHora(dateISO, v.hora || v.tiempo);
+      window.staleMarkUpdate(msData);
+    }
   });
-});
+
+})();
