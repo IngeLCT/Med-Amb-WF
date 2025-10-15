@@ -29,7 +29,7 @@
         cursor:pointer; user-select:none;
         padding:6px 10px; border-radius:10px;
         background:#e9f4ef; border:2px solid #2a2a2a;
-        font-size:14px; font-weight:600; color:#000;
+        font-size:12px; font-weight:600; color:#000;
         width: var(--agg-btn-w);
         text-align:center;
         transition: transform 0.12s ease, box-shadow 0.12s ease, font-size 0.12s ease;
@@ -38,7 +38,7 @@
       .agg-btn.active{
         transform: scale(1.06);  /* “crece” sin afectar layout */
         font-weight:800;
-        font-size:15px;
+        font-size:14px;
         background:#d9efe7;
       }
     `;
