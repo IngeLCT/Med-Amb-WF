@@ -1,207 +1,367 @@
-// gravocnox.js
-window.addEventListener('load', () => {
-  const MAX_POINTS = 24;
-  // Mensaje de carga: arriba, estilo unificado
-  const loadingClass = 'loading-msg';
-  ['VOC','NOx'].forEach(id=>{
-    const el=document.getElementById(id);
-    if(!el) return;
-    el.style.position='relative';
-    if(!el.querySelector('.'+loadingClass)){
-      el.insertAdjacentHTML('afterbegin',
-        '<div class="'+loadingClass+'" style="position:absolute;top:4px;left:0;width:100%;text-align:center;font-size:28px;font-weight:bold;color:#000;letter-spacing:.5px;pointer-events:none;">Cargando datos...</div>'
-      );
-  el.style.paddingTop = '36px';
-    }
-  });
+// grafvocnox.js — VOC y NOx con selector, 24 barras, títulos manuales, ejes formateados y Y dinámico
+(function () {
+  'use strict';
 
-  function initBar(divId, label, color, yMin, yMax) {
-    Plotly.newPlot(divId, [{
-      x: Array.from({ length: MAX_POINTS }, (_, i) => i),
-      y: new Array(MAX_POINTS).fill(null),
-      type: 'bar',
-      name: label,
-      marker: { color }
-    }], {
-      title: {
-        text: label,
-        font: { size: 20, color: 'black', family: 'Arial', weight: 'bold' }
-      },
-      xaxis: {
-        title: {
-          text: 'Fecha y Hora de Medición',
-          font: { size: 16, color: 'black', family: 'Arial', weight: 'bold' },
-          standoff: 30
-        },
-        type: 'category',
-        tickfont: { color: 'black', size: 14, family: 'Arial', weight: 'bold' },
-        gridcolor: 'black',
-        linecolor: 'black',
-        autorange: true,
-        tickangle: -45,
-      },
-      yaxis: {
-        title: {
-          text: label,
-          font: { size: 16, color: 'black', family: 'Arial', weight: 'bold' }
-        },
-        tickfont: { color: 'black', size: 14, family: 'Arial', weight: 'bold' },
-        gridcolor: 'black',
-        linecolor: 'black',
-        autorange: true,
-        fixedrange: false,
-        range: (yMin!==null&&yMax!==null)?[yMin,yMax]:[0, 10]
-      },
-      plot_bgcolor: '#cce5dc',
-      paper_bgcolor: '#cce5dc',
-      margin: { t: 50, l: 60, r: 40, b: 110 },
-      bargap: 0.2
-    }, {
-      responsive: true,
-      useResizeHandler: true
-    });
-  }
+  const MAX_BARS = 24;
+  const INITIAL_FETCH_LIMIT = 5000;  // histórico suficiente para agregación
+  const SAMPLE_BASE_MIN = 5;         // muestras llegan cada 5 minutos
+  const db = firebase.database();
 
-  function toIsoDate(fecha){
-    if(!fecha || typeof fecha !== 'string'){
-      const d=new Date();
-      const mm=String(d.getMonth()+1).padStart(2,'0');
-      const dd=String(d.getDate()).padStart(2,'0');
+  // Colores (respetar los originales encontrados)
+  const COLORS = {
+    VOC: '#ff8000',  // naranja
+    NOX: '#00ff00'   // verde
+  };
+
+  // ============= CSS del selector (compacto) + títulos manuales =============
+  (function injectSelectorCSS(){
+    if (document.getElementById('agg-toolbar-css')) return;
+    const style = document.createElement('style');
+    style.id = 'agg-toolbar-css';
+    style.textContent = `
+      .agg-toolbar-wrap{
+        display:flex; flex-direction:column; gap:6px; margin:8px 0 4px 0; width:100%;
+      }
+      .agg-chart-title{
+        font-weight:bold; font-size:20px; color:#000; text-align:center; line-height:1.1;
+      }
+      .agg-toolbar-label{
+        font-weight:bold; font-size:16px; color:#000; text-align:left;
+      }
+      .agg-toolbar{
+        display:flex; gap:6px; flex-wrap:wrap; align-items:center; justify-content:flex-start;
+        --agg-btn-w: 80px;
+      }
+      .agg-btn{
+        cursor:pointer; user-select:none;
+        padding:6px 10px; border-radius:10px;
+        background:#e9f4ef; border:2px solid #2a2a2a;
+        font-size:12px; font-weight:600; color:#000;
+        width: var(--agg-btn-w);
+        text-align:center;
+        transition: transform 0.12s ease, box-shadow 0.12s ease, font-size 0.12s ease;
+      }
+      .agg-btn:hover{ box-shadow:0 1px 0 rgba(0,0,0,.35); }
+      .agg-btn.active{
+        transform: scale(1.06);
+        font-weight:bold;
+        font-size:14px;
+        background:#d9efe7;
+      }
+    `;
+    document.head.appendChild(style);
+  })();
+
+  // ===================== Helpers de fecha/hora =====================
+  function toIsoDate(fecha) {
+    if (!fecha || typeof fecha !== 'string') {
+      const d = new Date();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
       return `${d.getFullYear()}-${mm}-${dd}`;
     }
-    const [dd,mm,yyyy] = fecha.split('-');
-    return `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
-  }
-
-  function addDays(isoDate, days){ const d=new Date(isoDate+'T00:00:00'); d.setDate(d.getDate()+days); const yyyy=d.getFullYear(); const mm=String(d.getMonth()+1).padStart(2,'0'); const dd=String(d.getDate()).padStart(2,'0'); return `${yyyy}-${mm}-${dd}`; }
-  
-  function inferDatesForEntries(entries){
-    const n = entries.length; const dates = new Array(n).fill(null); const markers=[];
-    for(let i=n-1;i>=0;i--){ const v=entries[i][1]; if(v && v.fecha){ markers.push(i);} }
-    if(markers.length>0){
-      const M0=markers[0]; const dateM0=toIsoDate(entries[M0][1].fecha); for(let i=M0;i<n;i++){ dates[i]=dateM0; }
-      for(let j=0;j<markers.length-1;j++){ const Ma=markers[j], Mb=markers[j+1]; const dateMa=toIsoDate(entries[Ma][1].fecha); const assigned=addDays(dateMa,-1); for(let i=Mb+1;i<Ma;i++){ dates[i]=assigned; } dates[Mb]=toIsoDate(entries[Mb][1].fecha);} 
-      const Mlast=markers[markers.length-1]; const assignedOld=addDays(toIsoDate(entries[Mlast][1].fecha),-1); for(let i=0;i<Mlast;i++){ dates[i]=assignedOld; }
+    const parts = fecha.split(/[-/]/);
+    if (parts.length !== 3) return new Date().toISOString().slice(0, 10);
+    if (parts[0].length === 4) {
+      const [yyyy, mm, dd] = parts;
+      return `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
     } else {
-      const today=toIsoDate(); for(let i=0;i<n;i++){ dates[i]=today; }
+      const [dd, mm, yyyy] = parts;
+      return `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
     }
-    return dates;
+  }
+  function parseTsFrom(isoDate, v) {
+    const raw = (v && (v.hora || v.tiempo)) ? (v.hora || v.tiempo) : '00:00';
+    const hhmmss = /^\d{1,2}:\d{2}$/.test(raw) ? `${raw}:00` : raw;
+    const ms = Date.parse(`${isoDate}T${hhmmss}`);
+    return Number.isFinite(ms) ? ms : null;
+  }
+  function floorToBin(ts, minutes) {
+    const size = minutes * 60000;
+    return ts - (ts % size);
+  }
+  function labelFromMs(ms) {
+    const d=new Date(ms);
+    const yyyy=d.getFullYear(), mm=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+    const hh=String(d.getHours()).padStart(2,'0'), mi=String(d.getMinutes()).padStart(2,'0');
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+  }
+  function buildTickText(labels) {
+    const t = []; let prevDate=null; let seen=false;
+    for (let i=0;i<labels.length;i++){
+      const s = String(labels[i] ?? '');
+      const m = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})/);
+      let datePart='', timePart='';
+      if (m) { datePart=m[1]; timePart=m[2]; }
+      const ddmmyyyy = datePart ? datePart.split('-').reverse().join('-') : '';
+      const isFirst = (!seen && !!datePart);
+      const changed = datePart && prevDate && (datePart !== prevDate);
+      const showDate = isFirst || changed;
+      t.push(showDate && datePart ? `${timePart}<br>${ddmmyyyy}` : (timePart || s));
+      if (datePart) { if(!seen) seen=true; prevDate=datePart; }
+    }
+    return t;
   }
 
-  function makeTimestampWithDate(isoDate, v){ const h = v.hora || v.tiempo || '00:00:00'; return `${isoDate} ${h}`; }
-
-    function Series(divId){
-      this.divId = divId;
-      this.slotIdx = Array.from({ length: MAX_POINTS }, (_, i) => i);
-      this.lbl = new Array(MAX_POINTS).fill('');
-      this.y   = new Array(MAX_POINTS).fill(null);
-      this.keys= new Array(MAX_POINTS).fill(null);
-      this.count = 0; // <<-- NUEVO: cuántos puntos válidos hay ya pintados (0..MAX_POINTS)
-  }
-
-    function updateYAxisRange(divId, yValues){
+  // ===================== Rango dinámico del eje Y =====================
+  function updateYAxisRange(divId, yValues){
     const finite = (yValues||[]).filter(v => Number.isFinite(v) && v >= 0);
     const maxVal = finite.length ? Math.max(...finite) : 0;
-    const upper = (maxVal > 0) ? (maxVal * 2) : 1;
+    const upper  = (maxVal > 0) ? (maxVal * 2) : 1;
     Plotly.relayout(divId, { 'yaxis.autorange': false, 'yaxis.range': [0, upper] });
   }
-  
-  function updateXAxisTicks(divId, xVals, labels){
-    const tickvals = Array.isArray(xVals) ? xVals : [];
-    const vals = Array.isArray(labels) ? labels : [];
-    const ticktext = [];
-    let prevDate = null;
-    let seen = false;
-    for(let i=0; i<vals.length; i++){
-      const s = String(vals[i] ?? '');
-      const m = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2}(?::\d{2})?)/);
-      let datePart = '', timePart = '';
-      if(m){ datePart = m[1]; timePart = m[2]; }
-      else { const parts = s.split(/\s+/); datePart = parts[0] || ''; timePart = parts[1] || parts[0] || ''; }
-      const hhmm = (timePart || '').split(':').slice(0,2).join(':') || s;
-      const isFirstNonEmpty = (!seen && !!datePart);
-      const dateChanged = datePart && prevDate && (datePart !== prevDate);
-      const showDate = isFirstNonEmpty || dateChanged;
-      const dispDate = datePart ? datePart.split('-').slice(0,3).reverse().join('-') : '';
-      ticktext.push(showDate && datePart ? `${hhmm}<br>${dispDate}` : hhmm);
-      if(datePart){ if(!seen) seen = true; prevDate = datePart; }
-    }
-    Plotly.relayout(divId, { 'xaxis.tickmode': 'array', 'xaxis.tickvals': tickvals, 'xaxis.ticktext': ticktext });
-  }Series.prototype.add = function(key, label, value) {
-    if (this.keys.includes(key)) return; // evitar duplicados
 
-    if (this.count < MAX_POINTS) {
-      // Aún no está llena la serie: coloca de IZQ -> DER
-      const idx = this.count;
-      this.y[idx]    = value;
-      this.lbl[idx]  = label;
-      this.keys[idx] = key;
-      this.count++;
+  // ===================== Estado crudo =====================
+  // Cada registro: { key, ts, voc, nox }
+  let raw = [];
+  let lastMarkerDateISO = null;
 
-      // Actualiza trazado
-      Plotly.update(this.divId, { x: [this.slotIdx], y: [this.y] });
-    } else {
-      // Ventana llena (24): desliza IZQ, agrega DER (tu comportamiento actual)
-      this.y.shift();    this.y.push(value);
-      this.lbl.shift();  this.lbl.push(label);
-      this.keys.shift(); this.keys.push(key);
-
-      Plotly.update(this.divId, { x: [this.slotIdx], y: [this.y] });
-    }
-
-    updateXAxisTicks(this.divId, this.slotIdx, this.lbl);
-    updateYAxisRange(this.divId, this.y);
-  };
-    Series.prototype.update = function(key,val){
-    const i=this.keys.indexOf(key); if(i===-1) return;
-    this.y[i]=val; 
-    Plotly.restyle(this.divId,{ y:[this.y] });
-    updateXAxisTicks(this.divId, this.slotIdx, this.lbl);
-    updateYAxisRange(this.divId, this.y);
+  // ===================== Config por serie =====================
+  const SERIES = {
+    VOC: { divId:'VOC', title:'VOC (Index)', color:COLORS.VOC, key:'voc', yTitle:'VOC (Index)', agg:5 },
+    NOX: { divId:'NOx', title:'NOx (Index)', color:COLORS.NOX, key:'nox', yTitle:'NOx (Index)', agg:5 }
   };
 
-  initBar('VOC','VOC index','#ff8000', null, null);
-  initBar('NOx','NOx index','#00ff00', null, null);
-  const sVOC=new Series('VOC');
-  const sNOx=new Series('NOx');
+  const MENU = [
+    { label:'5 min',  val:5   },
+    { label:'15 min', val:15  },
+    { label:'30 min', val:30  },
+    { label:'1 hr',   val:60  },
+    { label:'2 hr',   val:120 },
+    { label:'4 hr',   val:240 }
+  ];
 
-  const db=firebase.database();
-  const base=db.ref('/historial_mediciones').orderByKey().limitToLast(MAX_POINTS);
-    let lastMarkerDateISO = null;
-    base.once('value',snap=>{
-      const obj=snap.val();
-      if(!obj)return;
-      const entries = Object.entries(obj).sort(([a],[b])=> (a<b?-1:a>b?1:0));
-      const inferredDates = inferDatesForEntries(entries);
-      entries.forEach(([k,v], idx)=>{
-        const dateISO = inferredDates[idx];
-        if(v && v.fecha) lastMarkerDateISO = toIsoDate(v.fecha);
-        const label=makeTimestampWithDate(dateISO, v);
-        sVOC.add(k,label,Math.round(v.voc??0));
-        sNOx.add(k,label,Math.round(v.nox??0));
+  // ===================== Crear chart + toolbar por serie (título manual) =====================
+  function makeChart(cfg) {
+    const divId = cfg.divId;
+    const chartEl = document.getElementById(divId);
+
+    // Título manual + selector
+    const wrap = document.createElement('div');
+    wrap.className = 'agg-toolbar-wrap';
+    wrap.innerHTML = `
+      <div class="agg-chart-title">${cfg.yTitle}</div>
+      <div class="agg-toolbar-label">Seleccione el intervalo de lecturas</div>
+      <div class="agg-toolbar" id="tb-${divId}"></div>
+    `;
+    chartEl.parentElement.insertBefore(wrap, chartEl);
+
+    const toolbar = wrap.querySelector(`#tb-${divId}`);
+    MENU.forEach(opt=>{
+      const btn = document.createElement('button');
+      btn.className = 'agg-btn';
+      btn.textContent = opt.label;
+      btn.dataset.minutes = String(opt.val);
+      if (opt.val === cfg.agg) btn.classList.add('active');
+      btn.addEventListener('click', ()=>{
+        cfg.agg = opt.val;
+        toolbar.querySelectorAll('.agg-btn').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        redrawSeries(cfg);
       });
-  // Elimina solo los mensajes de carga y restaura padding
-  document.querySelectorAll('.'+loadingClass).forEach(n=>{ const p=n.parentElement; n.remove(); if(p) p.style.paddingTop=''; });
+      toolbar.appendChild(btn);
     });
 
-  db.ref('/historial_mediciones').limitToLast(1).on('child_added', snap=>{ 
-    const k=snap.key, v=snap.val();
-    if(v && v.fecha){ lastMarkerDateISO = toIsoDate(v.fecha); }
-    const dateISO = (v && v.fecha) ? toIsoDate(v.fecha) : (lastMarkerDateISO || toIsoDate());
-    const label=makeTimestampWithDate(dateISO, v||{});
-    sVOC.add(k,label,Math.round(v?.voc??0)); 
-    sNOx.add(k,label,Math.round(v?.nox??0)); 
+    // Plotly inicial
+    const labels = new Array(MAX_BARS).fill('');
+    let values = new Array(MAX_BARS).fill(null);
+    Plotly.newPlot(divId, [{
+      x: labels.map((_,i)=>i),
+      y: values,
+      type:'bar',
+      name: cfg.title,
+      marker:{ color: cfg.color }
+    }], {
+      // sin title (usamos el manual arriba)
+      xaxis: {
+        type: 'category',
+        tickmode:'array',
+        tickvals: labels.map((_,i)=>i),
+        ticktext: buildTickText(labels),
+        tickangle:-45,
+        automargin:true,
+        gridcolor:'black',
+        linecolor:'black',
+        autorange: true,
+        title: { text: '<b>Fecha y Hora de Medición</b>', font: { size:16,color:'black',family:'Arial',weight:'bold'}, standoff: 30 },
+        tickfont: { color:'black',size:14,family:'Arial',weight:'bold' }
+      },
+      yaxis: {
+        title: { text: `<b>${cfg.yTitle}</b>`, font: { size:16,color:'black',family:'Arial',weight:'bold' } },
+        tickfont: { color:'black',size:14,family:'Arial',weight:'bold' },
+        rangemode:'tozero',
+        gridcolor:'black',
+        linecolor:'black',
+        autorange: true,
+        fixedrange:false
+      },
+      margin:{ t:20, l:60, r:40, b:110 },
+      bargap:0.2,
+      paper_bgcolor:'#cce5dc',
+      plot_bgcolor:'#cce5dc',
+      showlegend:false
+    }, { responsive:true });
 
-    const msData = staleMsFromISOAndRecord(dateISO, v || {});
-    staleMarkUpdate(msData);
-  });
-  db.ref('/historial_mediciones').limitToLast(1).on('child_changed', snap=>{ 
-    const k=snap.key,v=snap.val(); 
-    sVOC.update(k,Math.round(v.voc??0)); 
-    sNOx.update(k,Math.round(v.nox??0)); 
+    // Y dinámico inicial
+    updateYAxisRange(divId, values);
+  }
 
-    const dateISO = (v && v.fecha) ? toIsoDate(v.fecha) : (lastMarkerDateISO || toIsoDate());
-    const msData = staleMsFromISOAndRecord(dateISO, v || {});
-    staleMarkUpdate(msData);
+  // ===================== Data builders =====================
+  // 5 min: últimas 24 crudas (por key)
+  function getLast24RawForKey(key) {
+    const last = raw.slice(-MAX_BARS);
+    const labels = last.map(r => labelFromMs(r.ts));
+    const values = last.map(r => Number(r[key]));
+    return { labels, values };
+  }
+
+  // Agregado: últimos 24 bins COMPLETOS (sin huecos)
+  function getAgg24ForKey(key, minutes) {
+    if (!raw.length) return { labels: new Array(MAX_BARS).fill(''), values: new Array(MAX_BARS).fill(null) };
+
+    const groups = new Map(); // binStartMs -> {sum,count}
+    for (const r of raw) {
+      const bin = floorToBin(r.ts, minutes);
+      const val = Number(r[key]);
+      if (!Number.isFinite(val)) continue;
+      const g = groups.get(bin) || { sum:0, count:0 };
+      g.sum += val; g.count += 1;
+      groups.set(bin, g);
+    }
+
+    // Bin completo = al menos minutes / SAMPLE_BASE_MIN muestras
+    const required = Math.max(1, Math.round(minutes / SAMPLE_BASE_MIN));
+    const completeKeys = Array.from(groups.keys())
+      .filter(k => groups.get(k).count >= required)
+      .sort((a,b)=>a-b);
+
+    const take = completeKeys.slice(-MAX_BARS);
+    const labels = take.map(b => labelFromMs(b));
+    const values = take.map(b => groups.get(b).sum / groups.get(b).count);
+    return { labels, values };
+  }
+
+  // ===================== Pintado =====================
+  function setChartData(cfg, labels, values) {
+    labels = labels.slice(-MAX_BARS);
+    values = values.slice(-MAX_BARS);
+    while (labels.length < MAX_BARS) labels.unshift('');
+    while (values.length < MAX_BARS) values.unshift(null);
+
+    const xIdx = labels.map((_,i)=>i);
+    Plotly.react(cfg.divId, [{
+      x: xIdx, y: values, type:'bar', name: cfg.title, marker:{ color: cfg.color }
+    }], {
+      xaxis: {
+        type: 'category',
+        tickmode:'array',
+        tickvals: xIdx,
+        ticktext: buildTickText(labels),
+        tickangle:-45,
+        automargin:true,
+        gridcolor:'black',
+        linecolor:'black',
+        autorange: true,
+        title: { text:'<b>Fecha y Hora de Medición</b>', font:{ size:16,color:'black',family:'Arial',weight:'bold' }, standoff: 30 },
+        tickfont: { color:'black',size:14,family:'Arial',weight:'bold' }
+      },
+      yaxis: {
+        title: { text:`<b>${cfg.yTitle}</b>`, font:{ size:16,color:'black',family:'Arial',weight:'bold' } },
+        tickfont: { color:'black',size:14,family:'Arial',weight:'bold' },
+        rangemode:'tozero',
+        gridcolor:'black',
+        linecolor:'black',
+        autorange: true,
+        fixedrange:false
+      },
+      margin:{ t:20, l:60, r:40, b:110 },
+      bargap:0.2,
+      paper_bgcolor:'#cce5dc',
+      plot_bgcolor:'#cce5dc',
+      showlegend:false
+    }, { responsive:true });
+
+    // Ajuste dinámico del eje Y después de pintar
+    updateYAxisRange(cfg.divId, values);
+  }
+
+  function redrawSeries(cfg) {
+    const data = (cfg.agg === 5) ? getLast24RawForKey(cfg.key)
+                                 : getAgg24ForKey(cfg.key, cfg.agg);
+    setChartData(cfg, data.labels, data.values);
+  }
+
+  // ===================== Crear charts =====================
+  Object.values(SERIES).forEach(makeChart);
+
+  // ===================== Carga inicial (histórico) =====================
+  const base = db.ref('/historial_mediciones').orderByKey().limitToLast(INITIAL_FETCH_LIMIT);
+  base.once('value', snap => {
+    const obj = snap.val(); if (!obj) return;
+    const entries = Object.entries(obj).sort(([a],[b]) => (a<b?-1:a>b?1:0)); // viejo->nuevo
+    entries.forEach(([k,v])=>{
+      if (v && v.fecha) lastMarkerDateISO = toIsoDate(v.fecha) || lastMarkerDateISO;
+      const dateISO = (v && v.fecha) ? toIsoDate(v.fecha)
+                                     : (lastMarkerDateISO || new Date().toISOString().slice(0,10));
+      const ts = parseTsFrom(dateISO, v||{});
+      if (Number.isFinite(ts)){
+        raw.push({
+          key:k, ts,
+          voc: Number(v?.voc ?? 0),
+          nox: Number(v?.nox ?? 0)
+        });
+      }
+    });
+    raw.sort((a,b)=>a.ts-b.ts);
+    Object.values(SERIES).forEach(redrawSeries);
   });
-});
+
+  // ===================== Tiempo real =====================
+  const liveRef = db.ref('/historial_mediciones').limitToLast(1);
+
+  liveRef.on('child_added', snap => {
+    const k = snap.key, v = snap.val() || {};
+    if (v && v.fecha) lastMarkerDateISO = toIsoDate(v.fecha) || lastMarkerDateISO;
+    const dateISO = (v && v.fecha) ? toIsoDate(v.fecha)
+                                   : (lastMarkerDateISO || new Date().toISOString().slice(0,10));
+    const ts = parseTsFrom(dateISO, v);
+    if (Number.isFinite(ts)){
+      raw.push({
+        key:k, ts,
+        voc: Number(v?.voc ?? 0),
+        nox: Number(v?.nox ?? 0)
+      });
+      raw.sort((a,b)=>a.ts-b.ts);
+      Object.values(SERIES).forEach(redrawSeries);
+    }
+    // Alerta de inactividad (si está disponible)
+    if (window.staleMsFromFechaHora && window.staleMarkUpdate) {
+      const msData = window.staleMsFromFechaHora(dateISO, v.hora || v.tiempo);
+      window.staleMarkUpdate(msData);
+    }
+  });
+
+  liveRef.on('child_changed', snap => {
+    const k = snap.key, v = snap.val() || {};
+    if (v && v.fecha) lastMarkerDateISO = toIsoDate(v.fecha) || lastMarkerDateISO;
+    const dateISO = (v && v.fecha) ? toIsoDate(v.fecha)
+                                   : (lastMarkerDateISO || new Date().toISOString().slice(0,10));
+    const ts = parseTsFrom(dateISO, v);
+    if (Number.isFinite(ts)){
+      const idx = raw.findIndex(r=>r.key===k);
+      const rec = {
+        key:k, ts,
+        voc: Number(v?.voc ?? 0),
+        nox: Number(v?.nox ?? 0)
+      };
+      if (idx>=0) raw[idx] = rec; else raw.push(rec);
+      raw.sort((a,b)=>a.ts-b.ts);
+      Object.values(SERIES).forEach(redrawSeries);
+    }
+    if (window.staleMsFromFechaHora && window.staleMarkUpdate) {
+      const msData = window.staleMsFromFechaHora(dateISO, v.hora || v.tiempo);
+      window.staleMarkUpdate(msData);
+    }
+  });
+
+})();
