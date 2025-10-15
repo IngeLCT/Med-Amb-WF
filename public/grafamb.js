@@ -1,4 +1,4 @@
-// grafamb.js — CO2, Temperatura, Humedad con selector compacto, 24 barras, títulos y ejes formateados
+// grafamb.js — CO2, Temperatura, Humedad con selector compacto, 24 barras, títulos manuales y ejes formateados
 (function () {
   'use strict';
 
@@ -9,7 +9,7 @@
   // Colores originales
   const COLORS = { CO2: '#990000', TEM: '#006600', HUM: '#0000cc' };
 
-  // ===================== CSS del selector (compacto) =====================
+  // ===================== CSS del selector (compacto) + títulos manuales =====================
   (function injectSelectorCSS(){
     if (document.getElementById('agg-toolbar-css')) return;
     const style = document.createElement('style');
@@ -18,12 +18,15 @@
       .agg-toolbar-wrap{
         display:flex; flex-direction:column; gap:6px; margin:8px 0 4px 0; width:100%;
       }
+      .agg-chart-title{
+        font-weight:bold; font-size:20px; color:#000; text-align:center; line-height:1.1;
+      }
       .agg-toolbar-label{
-        font-weight:700; font-size:16px; color:#000; text-align:left;
+        font-weight:bold; font-size:16px; color:#000; text-align:left;
       }
       .agg-toolbar{
         display:flex; gap:6px; flex-wrap:wrap; align-items:center; justify-content:flex-start;
-        --agg-btn-w: 96px; /* ancho uniforme de los botones */
+        --agg-btn-w: 80px; /* ancho uniforme de los botones */
       }
       .agg-btn{
         cursor:pointer; user-select:none;
@@ -37,7 +40,7 @@
       .agg-btn:hover{ box-shadow:0 1px 0 rgba(0,0,0,.35); }
       .agg-btn.active{
         transform: scale(1.06);  /* “crece” sin afectar layout */
-        font-weight:800;
+        font-weight:bold;
         font-size:14px;
         background:#d9efe7;
       }
@@ -122,15 +125,16 @@
     { label:'4 hr',   val:240 }
   ];
 
-  // ===================== Crear chart + toolbar por serie =====================
+  // ===================== Crear chart + toolbar por serie (título manual) =====================
   function makeChart(cfg) {
     const divId = cfg.divId;
 
-    // Toolbar (encima del chart)
+    // Toolbar (encima del chart): TÍTULO MANUAL + etiqueta + botones
     const chartEl = document.getElementById(divId);
     const wrap = document.createElement('div');
     wrap.className = 'agg-toolbar-wrap';
     wrap.innerHTML = `
+      <div class="agg-chart-title">${cfg.yTitle}</div>
       <div class="agg-toolbar-label">Seleccione el intervalo de lecturas</div>
       <div class="agg-toolbar" id="tb-${divId}"></div>
     `;
@@ -152,7 +156,7 @@
       toolbar.appendChild(btn);
     });
 
-    // Plotly inicial (vacío)
+    // Plotly inicial (sin título de gráfica; títulos solo en ejes)
     const labels = new Array(MAX_BARS).fill('');
     const values = new Array(MAX_BARS).fill(null);
 
@@ -163,7 +167,7 @@
       name: cfg.title,
       marker:{ color: cfg.color }
     }], {
-      title: { text: cfg.title, font: { size: 18, color: '#000' } },
+      // title eliminado: se usa el título manual arriba
       xaxis: {
         type: 'category',
         tickmode:'array',
@@ -171,17 +175,22 @@
         ticktext: buildTickText(labels),
         tickangle:-45,
         automargin:true,
-        title: { text: '<b>Fecha y Hora de Medición</b>', font: { size: 16, color:'#000' } },
-        tickfont: { size: 15, color:'#000' }
+        gridcolor:'black',
+        linecolor:'black',
+        autorange: true,
+        title: { text: '<b>Fecha y Hora de Medición</b>', font: { size:16,color:'black',family:'Arial',weight:'bold'} },
+        tickfont: { color:'black',size:14,family:'Arial',weight:'bold' }
       },
       yaxis: {
-        title: { text: `<b>${cfg.yTitle}</b>`, font: { size: 16, color:'#000' } },
-        tickfont: { size: 15, color:'#000' },
+        title: { text: `<b>${cfg.yTitle}</b>`, font: { size:16,color:'black',family:'Arial',weight:'bold' } },
+        tickfont: { color:'black',size:14,family:'Arial',weight:'bold' },
         rangemode:'tozero',
-        autorange:true,
-        fixedrange:false
+        gridcolor:'black',
+        linecolor:'black',
+        autorange: true,
+        fixedrange:false,
       },
-      margin:{ t:60, l:60, r:20, b:110 },
+      margin:{ t:20, l:60, r:40, b:110 }, // menos margen superior porque ya no hay title
       bargap:0.2,
       paper_bgcolor:'#cce5dc',
       plot_bgcolor:'#cce5dc',
@@ -228,7 +237,7 @@
     Plotly.react(cfg.divId, [{
       x: xIdx, y: values, type:'bar', name: cfg.title, marker:{ color: cfg.color }
     }], {
-      title: { text: cfg.title, font: { size: 20, color: '#000' } },
+      // sin title: usamos el manual
       xaxis: {
         type: 'category',
         tickmode:'array',
@@ -246,7 +255,7 @@
         autorange:true,
         fixedrange:false
       },
-      margin:{ t:60, l:60, r:20, b:110 },
+      margin:{ t:20, l:60, r:20, b:110 },
       bargap:0.2,
       paper_bgcolor:'#cce5dc',
       plot_bgcolor:'#cce5dc',
