@@ -4,6 +4,7 @@
 
   const MAX_BARS = 24;
   const INITIAL_FETCH_LIMIT = 5000; // histórico suficiente para agregación
+  const SAMPLE_BASE_MIN = 5;        // frecuencia de llegada de muestras (cada 5 min)
   const db = firebase.database();
 
   // Colores originales
@@ -178,7 +179,7 @@
         gridcolor:'black',
         linecolor:'black',
         autorange: true,
-        title: { text: '<b>Fecha y Hora de Medición</b>', font: { size:16,color:'black',family:'Arial',weight:'bold'} },
+        title: { text: '<b>Fecha y Hora de Medición</b>', font: { size:16,color:'black',family:'Arial',weight:'bold'}, standoff: 36 }, // ← más espacio
         tickfont: { color:'black',size:14,family:'Arial',weight:'bold' }
       },
       yaxis: {
@@ -190,7 +191,7 @@
         autorange: true,
         fixedrange:false,
       },
-      margin:{ t:20, l:60, r:40, b:110 }, // menos margen superior porque ya no hay title
+      margin:{ t:20, l:60, r:40, b:130 }, // ← más margen inferior
       bargap:0.2,
       paper_bgcolor:'#cce5dc',
       plot_bgcolor:'#cce5dc',
@@ -205,9 +206,11 @@
     const values = last.map(r => Number(r[key]));
     return { labels, values };
   }
-  // últimos 24 bins CON datos, sin huecos
+  // últimos 24 bins CON datos COMPLETOS, sin huecos
   function getAgg24ForKey(key, minutes) {
     if (!raw.length) return { labels: new Array(MAX_BARS).fill(''), values: new Array(MAX_BARS).fill(null) };
+
+    // Agrupa por binStart
     const groups = new Map(); // binStartMs -> {sum,count}
     for (const r of raw) {
       const bin = floorToBin(r.ts, minutes);
@@ -217,8 +220,16 @@
       g.sum += val; g.count += 1;
       groups.set(bin, g);
     }
-    const binKeys = Array.from(groups.keys()).sort((a,b)=>a-b);
-    const take = binKeys.slice(-MAX_BARS);
+
+    // Requisito de completitud: al menos minutes / SAMPLE_BASE_MIN mediciones en el bin
+    const required = Math.max(1, Math.round(minutes / SAMPLE_BASE_MIN));
+
+    // Solo bins completos
+    const completeKeys = Array.from(groups.keys())
+      .filter(k => groups.get(k).count >= required)
+      .sort((a,b)=>a-b);
+
+    const take = completeKeys.slice(-MAX_BARS);
     const labels = take.map(b => labelFromMs(b));
     const values = take.map(b => groups.get(b).sum / groups.get(b).count);
     return { labels, values };
@@ -248,7 +259,7 @@
         gridcolor:'black',
         linecolor:'black',
         autorange: true,
-        title: { text:'<b>Fecha y Hora de Medición</b>', font:{ size:16,color:'black',family:'Arial',weight:'bold' } },
+        title: { text:'<b>Fecha y Hora de Medición</b>', font:{ size:16,color:'black',family:'Arial',weight:'bold' }, standoff: 36 }, // ← más espacio
         tickfont: { color:'black',size:14,family:'Arial',weight:'bold' }
       },
       yaxis: {
@@ -260,7 +271,7 @@
         autorange: true,
         fixedrange:false,
       },
-      margin:{ t:20, l:60, r:40, b:110 },
+      margin:{ t:20, l:60, r:40, b:130 }, // ← más margen inferior
       bargap:0.2,
       paper_bgcolor:'#cce5dc',
       plot_bgcolor:'#cce5dc',
