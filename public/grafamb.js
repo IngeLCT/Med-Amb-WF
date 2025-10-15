@@ -12,34 +12,37 @@
   // ===================== Estilos del selector (inyectados) =====================
   (function injectSelectorCSS(){
     if (document.getElementById('agg-toolbar-css')) return;
-    const style = document.createElement('style');
-    style.id = 'agg-toolbar-css';
-    style.textContent = `
-      .agg-toolbar-wrap{
-        display:flex; flex-direction:column; gap:6px; margin:10px 0 6px 0;
-      }
-      .agg-toolbar-label{
-        font-weight:700; font-size:16px;
-      }
-      .agg-toolbar{
-        display:flex; gap:8px; flex-wrap:wrap; align-items:center;
-      }
-      .agg-btn{
-        cursor:pointer; user-select:none;
-        padding:8px 14px; border-radius:10px;
-        background:#e9f4ef; border:2px solid #2a2a2a;
-        font-size:16px; transition:transform 0.12s ease, box-shadow 0.12s ease, font-size 0.12s ease;
-        font-weight:500;
-      }
-      .agg-btn:hover{ box-shadow:0 1px 0 rgba(0,0,0,.4); }
-      .agg-btn.active{
-        transform:scale(1.08);
-        font-weight:800;
-        font-size:18px;
-        background:#d9efe7;
-      }
-    `;
-    document.head.appendChild(style);
+      const style = document.createElement('style');
+      style.id = 'agg-toolbar-css';
+      style.textContent = `
+        .agg-toolbar-wrap{
+          display:flex; flex-direction:column; gap:6px; margin:10px 0 6px 0;
+        }
+        .agg-toolbar-label{
+          font-weight:700; font-size:16px; color:#000;
+        }
+        .agg-toolbar{
+          display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+          --agg-btn-w: 110px; /* ← ancho uniforme de todos los botones (ajústalo si quieres) */
+        }
+        .agg-btn{
+          cursor:pointer; user-select:none;
+          padding:8px 14px; border-radius:10px;
+          background:#e9f4ef; border:2px solid #2a2a2a;
+          font-size:16px; font-weight:500; color:#000;     /* ← letra negra */
+          width: var(--agg-btn-w);                         /* ← mismo ancho para todos */
+          text-align:center;
+          transition: transform 0.12s ease, box-shadow 0.12s ease, font-size 0.12s ease;
+        }
+        .agg-btn:hover{ box-shadow:0 1px 0 rgba(0,0,0,.4); }
+        .agg-btn.active{
+          transform: scale(1.08);    /* ← agranda VISUALMENTE el seleccionado sin cambiar layout */
+          font-weight:800;
+          font-size:18px;
+          background:#d9efe7;
+        }
+      `;
+      document.head.appendChild(style);
   })();
 
   // ===================== Helpers de fechas/horas =====================
