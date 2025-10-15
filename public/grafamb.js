@@ -1,4 +1,4 @@
-// grafamb.js — CO2, Temperatura, Humedad con selector compacto, 24 barras, títulos manuales y ejes formateados
+// grafamb.js — CO2, Temperatura, Humedad con selector compacto, 24 barras, títulos manuales, ejes formateados y Y dinámico
 (function () {
   'use strict';
 
@@ -106,6 +106,14 @@
     return t;
   }
 
+  // ===================== Rango dinámico del eje Y =====================
+  function updateYAxisRange(divId, yValues){
+    const finite = (yValues||[]).filter(v => Number.isFinite(v) && v >= 0);
+    const maxVal = finite.length ? Math.max(...finite) : 0;
+    const upper  = (maxVal > 0) ? (maxVal * 2) : 1;
+    Plotly.relayout(divId, { 'yaxis.autorange': false, 'yaxis.range': [0, upper] });
+  }
+
   // ===================== Estado crudo (todas las muestras) =====================
   let raw = []; // { key, ts, co2, cTe, cHu }
   let lastMarkerDateISO = null;
@@ -159,7 +167,7 @@
 
     // Plotly inicial (sin título de gráfica; títulos solo en ejes)
     const labels = new Array(MAX_BARS).fill('');
-    const values = new Array(MAX_BARS).fill(null);
+    let values = new Array(MAX_BARS).fill(null);
 
     Plotly.newPlot(divId, [{
       x: labels.map((_,i)=>i),
@@ -179,7 +187,7 @@
         gridcolor:'black',
         linecolor:'black',
         autorange: true,
-        title: { text: '<b>Fecha y Hora de Medición</b>', font: { size:16,color:'black',family:'Arial',weight:'bold'}, standoff: 30 }, // ← más espacio
+        title: { text: '<b>Fecha y Hora de Medición</b>', font: { size:16,color:'black',family:'Arial',weight:'bold'}, standoff: 30 },
         tickfont: { color:'black',size:14,family:'Arial',weight:'bold' }
       },
       yaxis: {
@@ -191,12 +199,15 @@
         autorange: true,
         fixedrange:false,
       },
-      margin:{ t:20, l:60, r:40, b:110 }, // ← más margen inferior
+      margin:{ t:20, l:60, r:40, b:110 }, // más margen inferior
       bargap:0.2,
       paper_bgcolor:'#cce5dc',
       plot_bgcolor:'#cce5dc',
       showlegend:false
     }, { responsive:true });
+
+    // Y dinámico inicial
+    updateYAxisRange(divId, values);
   }
 
   // ===================== Data builders =====================
@@ -259,7 +270,7 @@
         gridcolor:'black',
         linecolor:'black',
         autorange: true,
-        title: { text:'<b>Fecha y Hora de Medición</b>', font:{ size:16,color:'black',family:'Arial',weight:'bold' }, standoff: 30 }, // ← más espacio
+        title: { text:'<b>Fecha y Hora de Medición</b>', font:{ size:16,color:'black',family:'Arial',weight:'bold' }, standoff: 30 },
         tickfont: { color:'black',size:14,family:'Arial',weight:'bold' }
       },
       yaxis: {
@@ -271,12 +282,15 @@
         autorange: true,
         fixedrange:false,
       },
-      margin:{ t:20, l:60, r:40, b:110 }, // ← más margen inferior
+      margin:{ t:20, l:60, r:40, b:110 },
       bargap:0.2,
       paper_bgcolor:'#cce5dc',
       plot_bgcolor:'#cce5dc',
       showlegend:false
     }, { responsive:true });
+
+    // Ajuste dinámico del eje Y después de pintar
+    updateYAxisRange(cfg.divId, values);
   }
 
   function redrawSeries(cfg) {
