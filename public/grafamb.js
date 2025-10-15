@@ -191,7 +191,7 @@
         autorange: true,
         fixedrange:false,
       },
-      margin:{ t:20, l:60, r:40, b:130 }, // ← más margen inferior
+      margin:{ t:20, l:60, r:40, b:110 }, // ← más margen inferior
       bargap:0.2,
       paper_bgcolor:'#cce5dc',
       plot_bgcolor:'#cce5dc',
@@ -271,7 +271,7 @@
         autorange: true,
         fixedrange:false,
       },
-      margin:{ t:20, l:60, r:40, b:130 }, // ← más margen inferior
+      margin:{ t:20, l:60, r:40, b:110 }, // ← más margen inferior
       bargap:0.2,
       paper_bgcolor:'#cce5dc',
       plot_bgcolor:'#cce5dc',
