@@ -20,10 +20,10 @@
         display:flex; flex-direction:column; gap:6px; margin:8px 0 4px 0; width:100%;
       }
       .agg-chart-title{
-        font-weight:bold; font-size:20px; color:#000; text-align:center; line-height:1.1;
+        font-weight:bold; font-size:20px; font-family:Arial; color:#000; text-align:center; line-height:1.1;
       }
       .agg-toolbar-label{
-        font-weight:bold; font-size:16px; color:#000; text-align:left;
+        font-weight:bold; font-size:16px; font-family:Arial; color:#000; text-align:left;
       }
       .agg-toolbar{
         display:flex; gap:6px; flex-wrap:wrap; align-items:center; justify-content:flex-start;
@@ -33,7 +33,7 @@
         cursor:pointer; user-select:none;
         padding:6px 10px; border-radius:10px;
         background:#e9f4ef; border:2px solid #2a2a2a;
-        font-size:12px; font-weight:600; color:#000;
+        font-size:12px; font-weight:600; font-family:Arial; color:#000;
         width: var(--agg-btn-w);
         text-align:center;
         transition: transform 0.12s ease, box-shadow 0.12s ease, font-size 0.12s ease;
@@ -42,6 +42,7 @@
       .agg-btn.active{
         transform: scale(1.06);  /* “crece” sin afectar layout */
         font-weight:bold;
+        font-family:Arial;
         font-size:14px;
         background:#d9efe7;
       }
@@ -67,43 +68,123 @@
       return `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
     }
   }
+
   function parseTsFrom(isoDate, v) {
     const raw = (v && (v.hora || v.tiempo)) ? (v.hora || v.tiempo) : '00:00';
     const hhmmss = /^\d{1,2}:\d{2}$/.test(raw) ? `${raw}:00` : raw;
     const ms = Date.parse(`${isoDate}T${hhmmss}`);
     return Number.isFinite(ms) ? ms : null;
   }
+
   function floorToBin(ts, minutes) {
     const size = minutes * 60000;
     return ts - (ts % size);
   }
+
   function avg(arr) {
     const v = arr.filter(n => Number.isFinite(n));
     if (!v.length) return null;
     return v.reduce((a,b)=>a+b,0)/v.length;
   }
+
   function labelFromMs(ms) {
     const d=new Date(ms);
     const yyyy=d.getFullYear(), mm=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
     const hh=String(d.getHours()).padStart(2,'0'), mi=String(d.getMinutes()).padStart(2,'0');
     return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
   }
-  // Ticktext amigable para eje categórico (con fecha en saltos)
-  function buildTickText(labels) {
-    const t = []; let prevDate=null; let seen=false;
-    for (let i=0;i<labels.length;i++){
-      const s = String(labels[i] ?? '');
-      const m = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})/);
-      let datePart='', timePart='';
-      if (m) { datePart=m[1]; timePart=m[2]; }
-      const ddmmyyyy = datePart ? datePart.split('-').reverse().join('-') : '';
-      const isFirst = (!seen && !!datePart);
-      const changed = datePart && prevDate && (datePart !== prevDate);
-      const showDate = isFirst || changed;
-      t.push(showDate && datePart ? `${timePart}<br>${ddmmyyyy}` : (timePart || s));
-      if (datePart) { if(!seen) seen=true; prevDate=datePart; }
+
+  // ===================== Etiquetado flexible del eje X =====================
+  // Opciones: 'start' | 'end' | 'range'
+  const LABEL_MODE = 'end'; // cámbialo a 'end' o 'range' cuando quieras
+  // Dónde estampar la fecha cuando cambia el día:
+  // 'left-prev'  → fecha del día ANTERIOR bajo el tick izquierdo
+  // 'left-next'  → fecha del NUEVO día bajo el tick izquierdo  ← lo que pides
+  // 'right'      → fecha del nuevo día bajo el tick derecho
+  // 'both'       → fecha anterior en el izquierdo y nueva en el derecho
+  const DATE_STAMP_MODE = 'left-next';
+
+  function fmt2(n){ return String(n).padStart(2,'0'); }
+  function fmtDate(ms){
+    const d = new Date(ms);
+    return `${d.getFullYear()}-${fmt2(d.getMonth()+1)}-${fmt2(d.getDate())}`;
+  }
+  function fmtTime(ms){
+    const d = new Date(ms);
+    return `${fmt2(d.getHours())}:${fmt2(d.getMinutes())}`;
+  }
+
+  /**
+   * Devuelve la etiqueta del tick según el modo seleccionado.
+   * Nota: SIEMPRE usa la fecha del INICIO del bin para mantener el
+   * marcador de cambio de día en el “límite izquierdo”.
+   */
+  function makeBinLabel(binStartMs, minutes, mode = LABEL_MODE){
+    const date  = fmtDate(binStartMs);
+    const tBeg  = fmtTime(binStartMs);
+    const tEnd  = fmtTime(binStartMs + minutes*60000);
+
+    // --- FIX: si minutes === 5 y LABEL_MODE === 'range', NO mostramos rango
+    if (minutes === SAMPLE_BASE_MIN) {
+      // siempre una sola hora para 5 min
+      return `${date} ${tBeg}`;
     }
-    return t;
+
+    if (mode === 'end')   return `${date} ${tEnd}`;
+    if (mode === 'range') return `${date} ${tBeg}–${tEnd}`;
+    return `${date} ${tBeg}`; // start
+  }
+
+  /**
+   * Coloca la FECHA en el tick anterior al cambio de día (límite izquierdo).
+   * Funciona con etiquetas 'start', 'end' o 'range' porque toma la fecha
+   * inicial del bin (que es la que pusimos al inicio de la etiqueta).
+   */
+  
+  function buildTickText(labels) {
+    // Mantiene todo el texto de hora: "hh:mm" o "hh:mm–hh:mm"
+    const items = labels.map(s => {
+      const str = String(s ?? '');
+      const m = str.match(/^(\d{4}-\d{2}-\d{2})\s+(.+)$/);
+      return { date: m ? m[1] : '', timeLabel: m ? m[2] : str };
+    });
+
+    const out = items.map(it => it.timeLabel);
+    let curr = items[0]?.date || '';
+    let stamped = false;
+
+    for (let i = 1; i < items.length; i++) {
+      const d = items[i].date;
+      if (d && curr && d !== curr) {
+        const ddPrev = curr.split('-').reverse().join('-');
+        const ddNew  = d.split('-').reverse().join('-');
+
+        switch (DATE_STAMP_MODE) {
+          case 'left-prev':
+            out[i - 1] = `${items[i - 1].timeLabel}<br>${ddPrev}`;
+            break;
+          case 'left-next': // ← fecha del día que empieza, pero en el tick izquierdo
+            out[i - 1] = `${items[i - 1].timeLabel}<br>${ddNew}`;
+            break;
+          case 'right':
+            out[i] = `${items[i].timeLabel}<br>${ddNew}`;
+            break;
+          case 'both':
+            out[i - 1] = `${items[i - 1].timeLabel}<br>${ddPrev}`;
+            out[i]     = `${items[i].timeLabel}<br>${ddNew}`;
+            break;
+        }
+        stamped = true;
+        curr = d;
+      }
+    }
+
+    // Si todo es un mismo día visible, estampa la fecha en el primer tick
+    if (!stamped && items[0]?.date) {
+      const dd = items[0].date.split('-').reverse().join('-');
+      out[0] = `${items[0].timeLabel}<br>${dd}`;
+    }
+    return out;
   }
 
   // ===================== Rango dinámico del eje Y =====================
@@ -213,7 +294,7 @@
   // ===================== Data builders =====================
   function getLast24RawForKey(key) {
     const last = raw.slice(-MAX_BARS);
-    const labels = last.map(r => labelFromMs(r.ts));
+    const labels = last.map(r => makeBinLabel(r.ts, SAMPLE_BASE_MIN, LABEL_MODE));
     const values = last.map(r => Number(r[key]));
     return { labels, values };
   }
@@ -233,7 +314,7 @@
     }
 
     // Requisito de completitud: al menos minutes / SAMPLE_BASE_MIN mediciones en el bin
-    const required = Math.max(1, Math.round(minutes / SAMPLE_BASE_MIN));
+    const required = Math.max(1, Math.ceil((minutes / SAMPLE_BASE_MIN) * 0.9));
 
     // Solo bins completos
     const completeKeys = Array.from(groups.keys())
@@ -241,7 +322,7 @@
       .sort((a,b)=>a-b);
 
     const take = completeKeys.slice(-MAX_BARS);
-    const labels = take.map(b => labelFromMs(b));
+    const labels = take.map(b => makeBinLabel(b, minutes, LABEL_MODE));
     const values = take.map(b => groups.get(b).sum / groups.get(b).count);
     return { labels, values };
   }
