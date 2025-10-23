@@ -7,21 +7,40 @@
 
   function msFromFechaHora(fecha, hora) {
     if (!fecha || !hora) return null;
+
     const f = String(fecha).trim();
     const h = String(hora).trim();
-    const fm = f.split(/[-/]/);
-    if (fm.length !== 3) return null;
-    let [y, m, d] = fm.map(n => parseInt(n, 10));
-    if (isNaN(y) || isNaN(m) || isNaN(d)) return null;
-    if (y < 100) y += 2000; // "25" -> 2025
+
+    const parts = f.split(/[-/]/).map(s => s.trim());
+    if (parts.length !== 3) return null;
+
+    let y, m, d;
+    // Detecta formato: si la 1ª parte tiene 4 dígitos, es YYYY-MM-DD; si no, asume DD-MM-YYYY
+    if (/^\d{4}$/.test(parts[0])) {
+      y = parseInt(parts[0], 10);
+      m = parseInt(parts[1], 10);
+      d = parseInt(parts[2], 10);
+    } else {
+      d = parseInt(parts[0], 10);
+      m = parseInt(parts[1], 10);
+      y = parseInt(parts[2], 10);
+      if (y < 100) y += 2000; // por si viene "25" => 2025
+    }
+
+    if (![y, m, d].every(n => Number.isFinite(n))) return null;
 
     // Acepta HH:MM o HH:MM:SS
-    const hm = h.split(':').map(n => parseInt(n, 10));
-    if (hm.length < 2) return null;
-    const [hh, mm, ss] = [hm[0] || 0, hm[1] || 0, hm[2] || 0];
-    const dt = new Date(y, m - 1, d, hh, mm, ss || 0, 0); // hora local
+    const hhmmss = h.split(':').map(n => parseInt(n, 10));
+    if (hhmmss.length < 2) return null;
+    const hh = hhmmss[0] ?? 0;
+    const mm = hhmmss[1] ?? 0;
+    const ss = hhmmss[2] ?? 0;
+
+    // Hora LOCAL
+    const dt = new Date(y, (m - 1), d, hh, mm, ss, 0);
     return dt.getTime();
   }
+
 
   // Para páginas que ya tienen dateISO (YYYY-MM-DD) y un registro con "hora" o "tiempo"
   function msFromISOAndRecord(isoDate, rec) {
