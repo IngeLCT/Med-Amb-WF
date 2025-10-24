@@ -61,8 +61,10 @@ function fmt2(n){ return String(n).padStart(2,'0'); }
 
 function fmtDate(ms){
   const d = new Date(ms);
-  return `${d.getFullYear()}-${fmt2(d.getMonth()+1)}-${fmt2(d.getDate())}`;
+  // DD-MM-YYYY
+  return `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`;
 }
+
 
 function fmtTime(ms){
   const d = new Date(ms);
@@ -346,21 +348,41 @@ function updateDataTable(labels, values, key, minutes){
     const style = document.createElement('style');
     style.id = 'agg-toolbar-css';
     style.textContent = `
-      .agg-toolbar-wrap{ display:flex; flex-direction:column; gap:6px; margin:8px 0 4px 0; width:100%; }
-      .agg-chart-title{ font-weight:bold; font-size:20px; color:#000; text-align:center; line-height:1.1; }
-      .agg-toolbar-label{ font-weight:bold; font-size:16px; color:#000; text-align:left; }
-      .agg-toolbar{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; justify-content:flex-start; --agg-btn-w:80px; }
+      .agg-toolbar-wrap{
+        display:flex; flex-direction:column; gap:6px; margin:8px 0 4px 0; width:100%;
+      }
+      .agg-chart-title{
+        font-weight:bold; font-size:20px; font-family:Arial; color:#000; text-align:center; line-height:1.1;
+      }
+      .agg-toolbar-label{
+        font-weight:bold; font-size:16px; font-family:Arial; color:#000; text-align:left;
+      }
+      .agg-toolbar{
+        display:flex; gap:6px; flex-wrap:wrap; align-items:center; justify-content:flex-start;
+        --agg-btn-w: 96px;
+      }
       .agg-btn{
-        cursor:pointer; user-select:none; padding:6px 10px; border-radius:10px;
-        background:#e9f4ef; border:2px solid #2a2a2a; font-size:12px; font-weight:600; color:#000;
-        width:var(--agg-btn-w); text-align:center; transition:transform .12s, box-shadow .12s, font-size .12s;
+        cursor:pointer; user-select:none;
+        padding:6px 10px; border-radius:10px;
+        background:#e9f4ef; border:2px solid #2a2a2a;
+        font-size:12px; font-weight:600; font-family:Arial; color:#000;
+        width: var(--agg-btn-w);
+        text-align:center;
+        transition: transform 0.12s ease, box-shadow 0.12s ease, font-size 0.12s ease;
       }
       .agg-btn:hover{ box-shadow:0 1px 0 rgba(0,0,0,.35); }
-      .agg-btn.active{ transform:scale(1.06); font-weight:bold; font-size:14px; background:#d9efe7; }
+      .agg-btn.active{
+        transform: scale(1.25);
+        font-weight:bold;
+        font-family:Arial;
+        font-size:18px;
+        background:#d9efe7;
+      }
     `;
     document.head.appendChild(style);
   }
 })();
+
 
 function ensureToolbar(){
   if (document.getElementById('agg-toolbar-upload')) return;
