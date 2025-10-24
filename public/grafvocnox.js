@@ -30,7 +30,7 @@
       }
       .agg-toolbar{
         display:flex; gap:6px; flex-wrap:wrap; align-items:center; justify-content:flex-start;
-        --agg-btn-w: 80px;
+        --agg-btn-w: 96px;
       }
       .agg-btn{
         cursor:pointer; user-select:none;
@@ -43,10 +43,10 @@
       }
       .agg-btn:hover{ box-shadow:0 1px 0 rgba(0,0,0,.35); }
       .agg-btn.active{
-        transform: scale(1.06);
+        transform: scale(1.25);
         font-weight:bold;
         font-family:Arial;
-        font-size:14px;
+        font-size:18px;
         background:#d9efe7;
       }
     `;
