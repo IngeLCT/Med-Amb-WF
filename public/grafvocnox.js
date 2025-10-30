@@ -93,7 +93,7 @@
 
   // ===================== Etiquetado flexible del eje X =====================
   // Opciones: 'start' | 'end' | 'range'
-  const LABEL_MODE = 'range'; // cámbialo a 'end' o 'range' cuando quieras
+  const LABEL_MODE = 'start'; // cámbialo a 'end' o 'range' cuando quieras
   // Dónde estampar la fecha cuando cambia el día:
   // 'left-prev'  → fecha del día ANTERIOR bajo el tick izquierdo
   // 'left-next'  → fecha del NUEVO día bajo el tick izquierdo  ← lo que pides
@@ -101,11 +101,30 @@
   // 'both'       → fecha anterior en el izquierdo y nueva en el derecho
   const DATE_STAMP_MODE = 'left-next';
 
+  // === Binning alineado a medianoche local ===
+  function startOfLocalDayMs(ms) {
+    const d = new Date(ms);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+
+  function floorToBinLocal(ms, minutes) {
+    const day0   = startOfLocalDayMs(ms);
+    const wMs    = minutes * 60000;
+    const offset = ms - day0;                     // ms transcurridos desde 00:00 local
+    const binOff = Math.floor(offset / wMs) * wMs;
+    return day0 + binOff;                         // INICIO del bin que contiene ms
+  }
+
+  // (Opcional, por compatibilidad si queda algún uso suelto)
+  function floorToBin(ms, minutes) { return floorToBinLocal(ms, minutes); }
+
   function fmt2(n){ return String(n).padStart(2,'0'); }
   function fmtDate(ms){
     const d = new Date(ms);
     return `${d.getFullYear()}-${fmt2(d.getMonth()+1)}-${fmt2(d.getDate())}`;
   }
+
   function fmtTime(ms){
     const d = new Date(ms);
     return `${fmt2(d.getHours())}:${fmt2(d.getMinutes())}`;
@@ -139,52 +158,76 @@
    * inicial del bin (que es la que pusimos al inicio de la etiqueta).
    */
   
-  function buildTickText(labels) {
-    // Mantiene todo el texto de hora: "hh:mm" o "hh:mm–hh:mm"
+  // Acepta YYYY-MM-DD o DD-MM-YYYY. Resuelve el caso especial 4h.
+  function buildTickText(labels, minutes) {
+    // 1) Parseo de fecha + HORA INICIAL (soporta 'start'/'end'/'range')
     const items = labels.map(s => {
       const str = String(s ?? '');
-      const m = str.match(/^(\d{4}-\d{2}-\d{2})\s+(.+)$/);
-      return { date: m ? m[1] : '', timeLabel: m ? m[2] : str };
+      // date = YYYY-MM-DD o DD-MM-YYYY ; time = HH:MM (toma la inicial si fuese rango)
+      const m = str.match(
+        /^((?:\d{4}-\d{2}-\d{2})|(?:\d{2}-\d{2}-\d{4}))\s+(\d{1,2}:\d{2})/
+      );
+      return { date: m ? m[1] : '', time: m ? m[2] : str };
     });
 
-    const out = items.map(it => it.timeLabel);
-    let curr = items[0]?.date || '';
+    // 2) Base: solo la hora
+    const out = items.map(it => it.time);
     let stamped = false;
 
-    for (let i = 1; i < items.length; i++) {
-      const d = items[i].date;
-      if (d && curr && d !== curr) {
-        const ddPrev = curr.split('-').reverse().join('-');
-        const ddNew  = d.split('-').reverse().join('-');
-
-        switch (DATE_STAMP_MODE) {
-          case 'left-prev':
-            out[i - 1] = `${items[i - 1].timeLabel}<br>${ddPrev}`;
-            break;
-          case 'left-next': // ← fecha del día que empieza, pero en el tick izquierdo
-            out[i - 1] = `${items[i - 1].timeLabel}<br>${ddNew}`;
-            break;
-          case 'right':
-            out[i] = `${items[i].timeLabel}<br>${ddNew}`;
-            break;
-          case 'both':
-            out[i - 1] = `${items[i - 1].timeLabel}<br>${ddPrev}`;
-            out[i]     = `${items[i].timeLabel}<br>${ddNew}`;
-            break;
+    // 3) Caso especial 4h: estampar fecha en ticks 00:00 (o en el primero visible)
+    if (minutes === 240) {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].time === '00:00' && items[i].date) {
+          const d = items[i].date;
+          const ddmmyyyy = /^\d{4}/.test(d) ? d.split('-').reverse().join('-') : d;
+          out[i] = `${items[i].time}<br>${ddmmyyyy}`;
+          stamped = true;
         }
+      }
+      if (!stamped && items[0]?.date) {
+        const d0 = items[0].date;
+        const ddmmyyyy0 = /^\d{4}/.test(d0) ? d0.split('-').reverse().join('-') : d0;
+        out[0] = `${items[0].time}<br>${ddmmyyyy0}`;
         stamped = true;
-        curr = d;
+      }
+    } else {
+      // 4) Resto de intervalos: fecha en el tick adecuado según DATE_STAMP_MODE
+      let curr = items[0]?.date || '';
+      for (let i = 1; i < items.length; i++) {
+        const d = items[i].date;
+        if (d && curr && d !== curr) {
+          const ddPrev = /^\d{4}/.test(curr) ? curr.split('-').reverse().join('-') : curr;
+          const ddNew  = /^\d{4}/.test(d)    ? d.split('-').reverse().join('-')    : d;
+          switch (DATE_STAMP_MODE) {
+            case 'left-prev':
+              out[i - 1] = `${items[i - 1].time}<br>${ddPrev}`;
+              break;
+            case 'left-next':
+              out[i - 1] = `${items[i - 1].time}<br>${ddNew}`;
+              break;
+            case 'right':
+              out[i] = `${items[i].time}<br>${ddNew}`;
+              break;
+            case 'both':
+              out[i - 1] = `${items[i - 1].time}<br>${ddPrev}`;
+              out[i]     = `${items[i].time}<br>${ddNew}`;
+              break;
+          }
+          stamped = true;
+          curr = d;
+        }
       }
     }
 
-    // Si todo es un mismo día visible, estampa la fecha en el primer tick
+    // 5) Si toda la ventana es un solo día, estampa fecha en el primer tick
     if (!stamped && items[0]?.date) {
-      const dd = items[0].date.split('-').reverse().join('-');
-      out[0] = `${items[0].timeLabel}<br>${dd}`;
+      const dd = /^\d{4}/.test(items[0].date)
+        ? items[0].date.split('-').reverse().join('-')
+        : items[0].date;
+      out[0] = `${items[0].time}<br>${dd}`;
     }
     return out;
   }
-
 
   // ===================== Rango dinámico del eje Y =====================
   function updateYAxisRange(divId, yValues){
@@ -260,7 +303,7 @@
         type: 'category',
         tickmode:'array',
         tickvals: labels.map((_,i)=>i),
-        ticktext: buildTickText(labels),
+        ticktext: buildTickText(labels, cfg.agg),
         tickangle:-45,
         automargin:true,
         gridcolor:'black',
@@ -298,30 +341,48 @@
     return { labels, values };
   }
 
-  // Agregado: últimos 24 bins COMPLETOS (sin huecos)
+  // Últimas 24 barras con bins alineados a 00:00 local,
+  // excluyendo el bin "en curso" y aplicando umbral 0.85 SOLO a bins terminados.
   function getAgg24ForKey(key, minutes) {
-    if (!raw.length) return { labels: new Array(MAX_BARS).fill(''), values: new Array(MAX_BARS).fill(null) };
+    if (!raw.length) {
+      return { labels: new Array(MAX_BARS).fill(''), values: new Array(MAX_BARS).fill(null), xTs: [] };
+    }
 
-    const groups = new Map(); // binStartMs -> {sum,count}
+    const widthMs = minutes * 60000;
+    let lastTs = 0;
+
+    // 1) Agrupar por bin (inicio de bin calculado con floorToBinLocal)
+    const groups = new Map(); // binStartMs -> {sum, count}
     for (const r of raw) {
-      const bin = floorToBin(r.ts, minutes);
-      const val = Number(r[key]);
-      if (!Number.isFinite(val)) continue;
-      const g = groups.get(bin) || { sum:0, count:0 };
-      g.sum += val; g.count += 1;
+      const v = Number(r[key]);
+      if (!Number.isFinite(v)) continue;
+      if (r.ts > lastTs) lastTs = r.ts;
+
+      const bin = floorToBinLocal(r.ts, minutes);
+      const g = groups.get(bin) || { sum: 0, count: 0 };
+      g.sum += v; g.count += 1;
       groups.set(bin, g);
     }
 
-    // Bin completo = al menos minutes / SAMPLE_BASE_MIN muestras
-    const required = Math.max(1, Math.ceil((minutes / SAMPLE_BASE_MIN) * 0.9));
-    const completeKeys = Array.from(groups.keys())
-      .filter(k => groups.get(k).count >= required)
-      .sort((a,b)=>a-b);
+    // 2) Excluir el bin que aún no termina (fin > último dato recibido)
+    const endedBins = Array.from(groups.keys())
+      .filter(b => (b + widthMs) <= lastTs)
+      .sort((a,b) => a - b);
 
-    const take = completeKeys.slice(-MAX_BARS);
+    // 3) Umbral de cobertura (0.85) SOLO para bins terminados
+    const SAMPLE_BASE_MIN = 5;                           // si tu base es 5 min
+    const expected = minutes / SAMPLE_BASE_MIN;          // p.ej. 15/5 = 3
+    const required = Math.max(1, Math.ceil(expected * 0.85));
+
+    const complete = endedBins.filter(b => groups.get(b).count >= required);
+
+    // 4) Últimas 24 barras
+    const take   = complete.slice(-MAX_BARS);
     const labels = take.map(b => makeBinLabel(b, minutes, LABEL_MODE));
     const values = take.map(b => groups.get(b).sum / groups.get(b).count);
-    return { labels, values };
+    const xTs    = take.map(b => b);                     // inicio de cada bin (ms)
+
+    return { labels, values, xTs };
   }
 
   // ===================== Pintado =====================
@@ -339,7 +400,7 @@
         type: 'category',
         tickmode:'array',
         tickvals: xIdx,
-        ticktext: buildTickText(labels),
+        ticktext: buildTickText(labels, cfg.agg),
         tickangle:-45,
         automargin:true,
         gridcolor:'black',
